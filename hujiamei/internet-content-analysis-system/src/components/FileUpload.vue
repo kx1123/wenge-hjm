@@ -311,7 +311,17 @@ const uploadSingleFile = (fileItem: FileItem, index: number): Promise<void> => {
         resolve()
       } catch (error) {
         fileItem.status = 'error'
-        const errorMessage = error instanceof Error ? error.message : '上传失败'
+        let errorMessage = '上传失败'
+        
+        if (error instanceof Error) {
+          errorMessage = error.message
+          // 处理 IndexedDB 版本错误
+          if (error.name === 'VersionError' || error.message.includes('VersionError')) {
+            errorMessage = '数据库版本不匹配，请刷新页面后重试。如果问题持续，请清除浏览器缓存。'
+            console.error('IndexedDB 版本错误:', error)
+          }
+        }
+        
         message.error(`${fileItem.name}: ${errorMessage}`)
         reject(error)
       }

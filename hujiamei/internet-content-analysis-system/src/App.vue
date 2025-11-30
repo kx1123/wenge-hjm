@@ -183,8 +183,8 @@ body {
 
 .ai-chat-container {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  bottom: 0;
+  right: 0;
   width: 400px;
   min-height: 500px;
   max-height: calc(100vh - 40px);

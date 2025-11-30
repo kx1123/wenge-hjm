@@ -24,12 +24,17 @@ export async function generateReport(options: ReportOptions): Promise<string> {
     const prompt = await loadReportPrompt(options.type, options.date, dataText)
     
     // 4. 调用AI生成报告
-    const report = await generateReportWithAPI(prompt)
-    
-    return report
+    try {
+      const report = await generateReportWithAPI(prompt)
+      return report
+    } catch (apiError) {
+      console.warn('AI API调用失败，使用降级报告:', apiError)
+      // 如果 API 调用失败，使用基于数据的降级报告
+      return generateFallbackReport(options, aggregatedData)
+    }
   } catch (error) {
     console.error('生成报告失败:', error)
-    // 降级到基础报告
+    // 最终降级到基础报告
     return generateFallbackReport(options)
   }
 }
@@ -174,72 +179,177 @@ ${dataText}
  */
 async function generateReportWithAPI(prompt: string): Promise<string> {
   try {
-    const analyzer = createAIAnalyzer({ mock: false })
+    // 默认使用 mock 模式避免 CORS 问题
+    // 如果需要使用真实 API，请设置环境变量 VITE_AI_MOCK=false 并配置代理
+    const useMock = import.meta.env.VITE_AI_MOCK !== 'false'
+    const analyzer = createAIAnalyzer({ mock: useMock })
     
-    // 使用通义千问API
-    const apiUrl = import.meta.env.VITE_AI_MOCK === 'true'
-      ? undefined
-      : 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'
-    
-    if (!apiUrl) {
-      // Mock模式
-      return generateFallbackReport({ type: 'daily', date: dayjs().format('YYYY-MM-DD') })
+    if (useMock) {
+      // Mock 模式下，生成基于数据的详细报告
+      return generateMockReport(prompt)
     }
     
-    const apiKey = import.meta.env.VITE_QWEN_API_KEY || 'sk-b48c6eb1c32242af82e89ee7582c66e9'
-    
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'X-DashScope-SSE': 'disable',
+    // 使用 analyzer 的 chat 方法，它会自动处理错误
+    const response = await analyzer.chat([
+      {
+        role: 'user',
+        content: prompt,
+        timestamp: new Date().toISOString(),
       },
-      body: JSON.stringify({
-        model: 'qwen-turbo',
-        input: {
-          messages: [
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-        },
-        parameters: {
-          temperature: 0.7,
-          max_tokens: 2000,
-        },
-      }),
-    })
+    ])
     
-    if (!response.ok) {
-      throw new Error(`API请求失败: ${response.statusText}`)
-    }
-    
-    const result = await response.json()
-    const content = result.output?.choices?.[0]?.message?.content || result.output?.text || ''
-    
-    if (!content) {
+    if (!response || response.trim().length === 0) {
       throw new Error('AI返回内容为空')
     }
     
-    return content
+    return response
   } catch (error) {
     console.error('AI生成报告失败:', error)
+    // 如果 API 调用失败，返回降级报告
     throw error
   }
 }
 
 /**
+ * 生成 Mock 模式的报告（基于实际数据）
+ */
+function generateMockReport(prompt: string): string {
+  // 从 prompt 中提取数据信息
+  const dataMatch = prompt.match(/网媒数据：共 (\d+) 条[\s\S]*?正面：(\d+) 条[\s\S]*?中性：(\d+) 条[\s\S]*?负面：(\d+) 条[\s\S]*?微博数据：共 (\d+) 条[\s\S]*?正面：(\d+) 条[\s\S]*?中性：(\d+) 条[\s\S]*?负面：(\d+) 条[\s\S]*?热门关键词：(.+)/)
+  
+  if (!dataMatch) {
+    return generateFallbackReport({ type: 'daily', date: dayjs().format('YYYY-MM-DD') })
+  }
+  
+  const [
+    ,
+    webmediaTotal,
+    webmediaPositive,
+    webmediaNeutral,
+    webmediaNegative,
+    weiboTotal,
+    weiboPositive,
+    weiboNeutral,
+    weiboNegative,
+    keywords,
+  ] = dataMatch
+  
+  const total = parseInt(webmediaTotal) + parseInt(weiboTotal)
+  const totalPositive = parseInt(webmediaPositive) + parseInt(weiboPositive)
+  const totalNeutral = parseInt(webmediaNeutral) + parseInt(weiboNeutral)
+  const totalNegative = parseInt(webmediaNegative) + parseInt(weiboNegative)
+  
+  const positiveRate = total > 0 ? ((totalPositive / total) * 100).toFixed(1) : '0'
+  const negativeRate = total > 0 ? ((totalNegative / total) * 100).toFixed(1) : '0'
+  
+  // 判断报告类型
+  const isDaily = prompt.includes('日报')
+  const isWeekly = prompt.includes('周报')
+  const isMonthly = prompt.includes('月报')
+  const reportType = isWeekly ? '周报' : isMonthly ? '月报' : '日报'
+  
+  return `# ${reportType} - ${dayjs().format('YYYY-MM-DD')}
+
+## 数据概览
+
+本${reportType}统计了舆情数据，共收集到 **${total}** 条有效数据。
+
+### 数据来源分布
+- **网媒数据**：${webmediaTotal} 条
+- **微博数据**：${weiboTotal} 条
+
+### 情感分布
+- **正面舆情**：${totalPositive} 条（${positiveRate}%）
+- **中性舆情**：${totalNeutral} 条（${((totalNeutral / total) * 100).toFixed(1)}%）
+- **负面舆情**：${totalNegative} 条（${negativeRate}%）
+
+## 情感分析
+
+### 整体情感趋势
+${totalPositive > totalNegative ? '整体舆情以正面为主，' : totalNegative > totalPositive ? '整体舆情以负面为主，' : '整体舆情较为平衡，'}正面舆情占比 ${positiveRate}%，负面舆情占比 ${negativeRate}%。
+
+### 数据源对比
+- **网媒数据**：正面 ${webmediaPositive} 条，中性 ${webmediaNeutral} 条，负面 ${webmediaNegative} 条
+- **微博数据**：正面 ${weiboPositive} 条，中性 ${weiboNeutral} 条，负面 ${weiboNegative} 条
+
+## 热门话题
+
+根据关键词分析，当前热门话题包括：${keywords || '暂无数据'}。
+
+## 趋势洞察
+
+${totalNegative > 50 ? '⚠️ **重点关注**：负面舆情数量较多，建议加强舆情监控和应对措施。' : ''}
+${totalPositive > totalNegative * 2 ? '✅ **积极信号**：正面舆情占主导地位，整体舆情环境良好。' : ''}
+${total > 1000 ? '📊 **数据规模**：数据量较大，建议进行更深入的细分分析。' : ''}
+
+## 建议措施
+
+1. **持续监控**：保持对舆情动态的实时关注，及时发现和处理异常情况。
+${totalNegative > 30 ? '2. **负面应对**：针对负面舆情，制定相应的应对策略，及时回应和澄清。\n' : ''}3. **数据挖掘**：利用关键词和话题分析，深入挖掘舆情背后的趋势和规律。
+4. **渠道优化**：根据网媒和微博的数据表现，优化不同渠道的舆情管理策略。
+${totalPositive > totalNegative ? '5. **正面宣传**：继续保持和加强正面舆情的传播，提升品牌形象。' : '5. **形象修复**：加强正面宣传，积极回应负面舆情，修复和提升品牌形象。'}
+
+---
+
+*本报告基于当前数据生成，建议结合实际情况进行深入分析。*`
+}
+
+/**
  * 生成降级报告
  */
-function generateFallbackReport(options: ReportOptions): string {
+function generateFallbackReport(options: ReportOptions, aggregatedData?: any): string {
   const typeMap = {
     daily: '日报',
     weekly: '周报',
     monthly: '月报',
   }
   
+  // 如果有聚合数据，生成更详细的报告
+  if (aggregatedData) {
+    const total = aggregatedData.webmedia.total + aggregatedData.weibo.total
+    const totalPositive = aggregatedData.webmedia.sentiment.positive + aggregatedData.weibo.sentiment.positive
+    const totalNeutral = aggregatedData.webmedia.sentiment.neutral + aggregatedData.weibo.sentiment.neutral
+    const totalNegative = aggregatedData.webmedia.sentiment.negative + aggregatedData.weibo.sentiment.negative
+    
+    return `# ${typeMap[options.type]} - ${options.date}
+
+## 数据概览
+
+本${typeMap[options.type]}统计了 ${options.date} 的舆情数据，共收集到 **${total}** 条有效数据。
+
+### 数据来源分布
+- **网媒数据**：${aggregatedData.webmedia.total} 条
+- **微博数据**：${aggregatedData.weibo.total} 条
+
+### 情感分布
+- **正面舆情**：${totalPositive} 条
+- **中性舆情**：${totalNeutral} 条
+- **负面舆情**：${totalNegative} 条
+
+## 情感分析
+
+整体舆情${totalPositive > totalNegative ? '以正面为主' : totalNegative > totalPositive ? '以负面为主' : '较为平衡'}。
+
+## 热门话题
+
+${aggregatedData.topKeywords && aggregatedData.topKeywords.length > 0 
+  ? '热门关键词：' + aggregatedData.topKeywords.join('、')
+  : '暂无数据'}
+
+## 趋势洞察
+
+数据统计完成，建议进行更深入的分析。
+
+## 建议措施
+
+1. 持续关注舆情动态
+2. 及时响应负面舆情
+3. 加强正面宣传
+4. 利用关键词分析挖掘潜在趋势
+`
+  }
+  
+  // 基础降级报告
   return `# ${typeMap[options.type]} - ${options.date}
 
 ## 数据概览

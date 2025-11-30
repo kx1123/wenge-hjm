@@ -10,7 +10,9 @@ class ContentAnalysisDB extends Dexie {
 
   constructor() {
     super('ContentAnalysisDB')
-    this.version(1).stores({
+    // 使用版本 100 以确保高于任何现有版本（兼容版本 40）
+    // 如果遇到版本错误，会自动删除旧数据库并重建
+    this.version(100).stores({
       // 表 webmedia：字段 + 索引 ['publishTime', 'sentiment', 'source']
       webmedia: '++id, publishTime, sentiment, source',
       // 表 weibos：字段 + 索引 ['publishTime', 'sentiment', 'userName']
@@ -20,9 +22,86 @@ class ContentAnalysisDB extends Dexie {
 }
 
 /**
+ * 删除旧数据库（用于修复版本冲突）
+ */
+async function deleteOldDatabase(): Promise<void> {
+  try {
+    // 先关闭所有连接
+    if (db.isOpen()) {
+      db.close()
+    }
+    await Dexie.delete('ContentAnalysisDB')
+    console.log('旧数据库已删除')
+  } catch (error) {
+    console.warn('删除旧数据库失败（可能不存在）:', error)
+  }
+}
+
+/**
  * 数据库实例
  */
 export const db = new ContentAnalysisDB()
+
+// 处理数据库版本错误
+db.on('versionchange', (event: any) => {
+  console.warn('数据库版本变更:', event)
+  // 允许版本升级
+  if (event.newVersion) {
+    console.log('数据库版本升级中...')
+  }
+})
+
+// 初始化数据库（自动处理版本冲突）
+let dbInitialized = false
+
+async function ensureDbOpen() {
+  if (dbInitialized && db.isOpen()) {
+    return
+  }
+  
+  try {
+    await db.open()
+    dbInitialized = true
+    console.log('数据库打开成功，版本:', db.verno)
+  } catch (error: any) {
+    // 如果是版本错误，删除旧数据库并重新打开
+    if (
+      error.name === 'VersionError' || 
+      error.message?.includes('VersionError') || 
+      error.message?.includes('less than the existing version') ||
+      error.message?.includes('requested version')
+    ) {
+      console.warn('检测到版本冲突，删除旧数据库并重新创建...')
+      try {
+        await deleteOldDatabase()
+        // 等待一小段时间确保删除完成
+        await new Promise(resolve => setTimeout(resolve, 100))
+        // 重新打开数据库
+        await db.open()
+        dbInitialized = true
+        console.log('数据库重新创建成功，版本:', db.verno)
+      } catch (reopenError) {
+        console.error('重新打开数据库失败:', reopenError)
+        // 如果还是失败，提示用户刷新页面
+        if (typeof window !== 'undefined') {
+          const shouldReload = confirm('数据库版本冲突，需要刷新页面以修复。是否现在刷新？')
+          if (shouldReload) {
+            window.location.reload()
+          }
+        }
+        throw reopenError
+      }
+    } else {
+      console.error('数据库打开失败:', error)
+      throw error
+    }
+  }
+}
+
+// 立即尝试打开数据库
+ensureDbOpen().catch((error) => {
+  console.error('数据库初始化失败:', error)
+})
 
 /**
  * 搜索参数接口
@@ -77,12 +156,21 @@ export interface Stats {
  * 批量插入网媒数据
  */
 export async function insertWebMedia(data: WebMediaData[]): Promise<number[]> {
+  // 确保数据库已打开
+  await ensureDbOpen()
+  
   try {
     return await db.webmedia.bulkAdd(data)
   } catch (error) {
     // 如果存在重复键，使用 bulkPut
     if (error instanceof Error && error.name === 'ConstraintError') {
       return await db.webmedia.bulkPut(data)
+    }
+    // 如果是版本错误，尝试修复
+    if (error instanceof Error && (error.name === 'VersionError' || error.message?.includes('VersionError'))) {
+      await deleteOldDatabase()
+      await ensureDbOpen()
+      return await db.webmedia.bulkAdd(data)
     }
     throw error
   }
@@ -92,12 +180,21 @@ export async function insertWebMedia(data: WebMediaData[]): Promise<number[]> {
  * 批量插入微博数据
  */
 export async function insertWeibos(data: WeiboData[]): Promise<number[]> {
+  // 确保数据库已打开
+  await ensureDbOpen()
+  
   try {
     return await db.weibos.bulkAdd(data)
   } catch (error) {
     // 如果存在重复键，使用 bulkPut
     if (error instanceof Error && error.name === 'ConstraintError') {
       return await db.weibos.bulkPut(data)
+    }
+    // 如果是版本错误，尝试修复
+    if (error instanceof Error && (error.name === 'VersionError' || error.message?.includes('VersionError'))) {
+      await deleteOldDatabase()
+      await ensureDbOpen()
+      return await db.weibos.bulkAdd(data)
     }
     throw error
   }

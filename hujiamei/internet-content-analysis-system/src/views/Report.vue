@@ -15,11 +15,9 @@
           <n-date-picker
             v-model:value="selectedDate"
             type="date"
-            format="yyyy-MM-dd"
-            :is-date-disabled="disableDate"
-            placeholder="选择日期"
             clearable
-            style="width: 200px;"
+            placeholder="选择日期"
+            :is-date-disabled="disableDate"
           />
           <n-button type="primary" @click="handleGenerateReport" :loading="generating" :disabled="!selectedDate">
             生成报告
@@ -53,9 +51,9 @@ import {
   useMessage,
 } from 'naive-ui'
 import { generateReport, type ReportType } from '@/features/report/reportGenerator'
-import dayjs from 'dayjs'
-import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
+import dayjs from 'dayjs'
 
 const message = useMessage()
 
@@ -76,70 +74,36 @@ function disableDate(timestamp: number): boolean {
   return timestamp > Date.now()
 }
 
-/**
- * 渲染 Markdown 为 HTML
- */
-function renderMarkdown(text: string): string {
-  if (!text) return ''
-  
-  // 转义 HTML
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  
-  // 标题 # ## ###
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
-  
-  // 粗体 **text**
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  
-  // 斜体 *text*
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  
-  // 代码块 ```code```
-  html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-  
-  // 行内代码 `code`
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-  
-  // 链接 [text](url)
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
-  
-  // 列表项 - item
-  html = html.replace(/^\- (.+)$/gm, '<li>$1</li>')
-  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-  
-  // 有序列表 1. item
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-  
-  // 换行（保留段落）
-  html = html.replace(/\n\n/g, '</p><p>')
-  html = html.replace(/\n/g, '<br>')
-  
-  // 包装段落
-  if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<pre')) {
-    html = '<p>' + html + '</p>'
-  }
-  
-  return html
-}
-
-/**
- * 渲染后的内容
- */
+// 简单的Markdown转HTML（不使用marked库，直接处理基本格式）
 const renderedContent = computed(() => {
-  return renderMarkdown(reportContent.value)
+  if (!reportContent.value) return ''
+  let html = reportContent.value
+  // 转换标题
+  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>')
+  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>')
+  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>')
+  // 转换粗体
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+  // 转换列表
+  html = html.replace(/^\d+\. (.*$)/gim, '<li>$1</li>')
+  html = html.replace(/^- (.*$)/gim, '<li>$1</li>')
+  // 转换段落
+  html = html.split('\n\n').map(p => {
+    if (!p.trim()) return ''
+    if (p.startsWith('<h') || p.startsWith('<li>')) return p
+    return `<p>${p.replace(/\n/g, '<br>')}</p>`
+  }).join('')
+  // 包装列表项
+  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+  return html
 })
 
 const handleGenerateReport = async () => {
   if (!selectedDate.value) {
-    message.warning('请先选择日期')
+    message.warning('请选择日期')
     return
   }
-
+  
   generating.value = true
   reportContent.value = ''
 
