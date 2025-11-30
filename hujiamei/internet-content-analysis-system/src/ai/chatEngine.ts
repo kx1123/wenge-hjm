@@ -7,7 +7,7 @@ import dayjs from 'dayjs'
  * 创建聊天引擎
  */
 export function createChatEngine(
-  dbInstance?: typeof db,
+  _dbInstance?: typeof db,
   analyzer = createAIAnalyzer()
 ) {
   /**
@@ -296,7 +296,7 @@ export function createChatEngine(
   async function generateResponse(
     question: string,
     queryResult: any,
-    history: ChatMessage[]
+    _history: ChatMessage[]
   ): Promise<string> {
     try {
       // 构建提示词
@@ -353,7 +353,7 @@ export function createChatEngine(
   /**
    * 生成降级回复
    */
-  function generateFallbackResponse(question: string, queryResult: any): string {
+  function generateFallbackResponse(_question: string, queryResult: any): string {
     if (!queryResult) {
       return '抱歉，我无法理解您的问题。请尝试询问数据统计、趋势分析或具体数据详情。'
     }

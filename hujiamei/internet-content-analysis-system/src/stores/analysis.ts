@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { createAIAnalyzer } from '@/ai/client'
-import type { WebMediaData, WeiboData } from '@/interfaces/data'
 import {
   getUnanalyzedWebMedia,
   getUnanalyzedWeibos,
@@ -44,7 +43,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
             title: item.title,
           })
 
-          await updateWebMediaData(item.id!, {
+          await updateWebMediaData(typeof item.id === 'number' ? item.id : Number(item.id) || 0, {
             sentiment: result.sentiment,
             sentimentScore: result.sentimentScore,
             aiKeywords: result.keywords,
@@ -94,7 +93,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
             userName: item.userName,
           })
 
-          await updateWeiboData(item.id!, {
+          await updateWeiboData(typeof item.id === 'number' ? item.id : Number(item.id) || 0, {
             sentiment: result.sentiment,
             sentimentScore: result.sentimentScore,
             aiKeywords: result.keywords,

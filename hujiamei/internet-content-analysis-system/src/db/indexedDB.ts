@@ -160,17 +160,20 @@ export async function insertWebMedia(data: WebMediaData[]): Promise<number[]> {
   await ensureDbOpen()
   
   try {
-    return await db.webmedia.bulkAdd(data)
+    const result = await db.webmedia.bulkAdd(data)
+    return Array.isArray(result) ? result : [result]
   } catch (error) {
     // 如果存在重复键，使用 bulkPut
     if (error instanceof Error && error.name === 'ConstraintError') {
-      return await db.webmedia.bulkPut(data)
+      const result = await db.webmedia.bulkPut(data)
+      return Array.isArray(result) ? result : [result]
     }
     // 如果是版本错误，尝试修复
     if (error instanceof Error && (error.name === 'VersionError' || error.message?.includes('VersionError'))) {
       await deleteOldDatabase()
       await ensureDbOpen()
-      return await db.webmedia.bulkAdd(data)
+      const result = await db.webmedia.bulkAdd(data)
+      return Array.isArray(result) ? result : [result]
     }
     throw error
   }
@@ -184,17 +187,20 @@ export async function insertWeibos(data: WeiboData[]): Promise<number[]> {
   await ensureDbOpen()
   
   try {
-    return await db.weibos.bulkAdd(data)
+    const result = await db.weibos.bulkAdd(data)
+    return Array.isArray(result) ? result : [result]
   } catch (error) {
     // 如果存在重复键，使用 bulkPut
     if (error instanceof Error && error.name === 'ConstraintError') {
-      return await db.weibos.bulkPut(data)
+      const result = await db.weibos.bulkPut(data)
+      return Array.isArray(result) ? result : [result]
     }
     // 如果是版本错误，尝试修复
     if (error instanceof Error && (error.name === 'VersionError' || error.message?.includes('VersionError'))) {
       await deleteOldDatabase()
       await ensureDbOpen()
-      return await db.weibos.bulkAdd(data)
+      const result = await db.weibos.bulkAdd(data)
+      return Array.isArray(result) ? result : [result]
     }
     throw error
   }
@@ -422,22 +428,18 @@ export async function updateWeiboData(id: number, updates: Partial<WeiboData>): 
  * 获取未分析的网媒数据
  */
 export async function getUnanalyzedWebMedia(limit?: number): Promise<WebMediaData[]> {
-  return await db.webmedia
-    .where('sentiment')
-    .equals(undefined)
-    .limit(limit || 100)
-    .toArray()
+  const all = await db.webmedia.toArray()
+  const unanalyzed = all.filter(item => item.sentiment === undefined)
+  return limit ? unanalyzed.slice(0, limit) : unanalyzed
 }
 
 /**
  * 获取未分析的微博数据
  */
 export async function getUnanalyzedWeibos(limit?: number): Promise<WeiboData[]> {
-  return await db.weibos
-    .where('sentiment')
-    .equals(undefined)
-    .limit(limit || 100)
-    .toArray()
+  const all = await db.weibos.toArray()
+  const unanalyzed = all.filter(item => item.sentiment === undefined)
+  return limit ? unanalyzed.slice(0, limit) : unanalyzed
 }
 
 /**

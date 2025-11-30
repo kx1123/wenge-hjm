@@ -260,7 +260,7 @@ const uploadFiles = async () => {
 }
 
 // 上传单个文件
-const uploadSingleFile = (fileItem: FileItem, index: number): Promise<void> => {
+const uploadSingleFile = (fileItem: FileItem, _index: number): Promise<void> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
 

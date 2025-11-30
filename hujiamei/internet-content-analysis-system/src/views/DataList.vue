@@ -293,7 +293,7 @@ import { mergeData, toUnifiedData, toUnifiedDataFromWeibo } from '@/interfaces/d
 import dayjs from 'dayjs'
 
 const route = useRoute()
-const router = useRouter()
+const _router = useRouter()
 const message = useMessage()
 const dataStore = useDataStore()
 

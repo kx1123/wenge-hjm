@@ -78,7 +78,7 @@
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { NCard, NButton, NSpace, NTag } from 'naive-ui'
+import { NButton, NSpace, NTag } from 'naive-ui'
 import RealtimeDashboard from '@/components/Dashboard/RealtimeDashboard.vue'
 import AlertPanel from '@/components/Dashboard/AlertPanel.vue'
 import { useRealtimeSimulator } from '@/composables/useRealtimeSimulator'

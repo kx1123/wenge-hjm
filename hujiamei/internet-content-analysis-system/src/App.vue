@@ -115,7 +115,7 @@ import { createChatEngine } from '@/ai/chatEngine'
 import type { ChatMessage } from '@/interfaces/ai'
 
 const route = useRoute()
-const router = useRouter()
+const _router = useRouter()
 
 const currentRoute = computed(() => route.path)
 const theme = darkTheme

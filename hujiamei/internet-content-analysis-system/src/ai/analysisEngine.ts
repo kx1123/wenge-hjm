@@ -1,7 +1,7 @@
 import type { WebMediaData, WeiboData } from '@/interfaces/data'
 import type { AIAnalysisResult } from '@/interfaces/ai'
 import { createAIAnalyzer, type AIAnalyzer } from '@/ai/client'
-import { db, updateWebMediaData, updateWeiboData } from '@/db/indexedDB'
+import { updateWebMediaData, updateWeiboData } from '@/db/indexedDB'
 
 /**
  * 可分析的数据类型
@@ -28,15 +28,19 @@ export class AIAnalysisEngine {
       const dataType = 'source' in data ? 'webmedia' : 'weibo'
       
       // 调用AI分析
+      const analyzeOptions = {
+        type: dataType,
+        content: data.content,
+        title: 'title' in data ? data.title : undefined,
+        userName: 'userName' in data ? data.userName : undefined,
+        summaryLength: 200,
+      }
+      
       const [sentimentResult, keywordsResult, summaryResult, categoryResult] = await Promise.all([
-        this.analyzer.analyzeSentiment(
-          data.content,
-          dataType,
-          'title' in data ? data.title : undefined
-        ),
-        this.analyzer.extractKeywords(data.content, 10),
-        this.analyzer.generateSummary(data.content, 200),
-        this.analyzer.classifyTopic(data.content, dataType, 'title' in data ? data.title : undefined),
+        this.analyzer.analyzeSentiment(analyzeOptions),
+        this.analyzer.extractKeywords(analyzeOptions),
+        this.analyzer.generateSummary(analyzeOptions),
+        this.analyzer.classifyCategory(analyzeOptions),
       ])
 
       const result: AIAnalysisResult = {
@@ -44,8 +48,7 @@ export class AIAnalysisEngine {
         sentimentScore: sentimentResult.score,
         keywords: keywordsResult,
         summary: summaryResult,
-        category: categoryResult.category,
-        topics: categoryResult.topics,
+        category: categoryResult,
       }
 
       // 更新数据库

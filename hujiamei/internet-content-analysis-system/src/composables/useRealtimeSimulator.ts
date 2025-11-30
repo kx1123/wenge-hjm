@@ -69,7 +69,7 @@ export function useRealtimeSimulator() {
 
         // 创建模拟数据项
         const simulatedItem: SimulatedDataItem = {
-          id: item.id,
+          id: typeof item.id === 'number' ? item.id : Number(item.id) || Date.now(),
           type: isWebMedia ? 'webmedia' : 'weibo',
           data: item,
           isNew: true,
@@ -116,12 +116,12 @@ export function useRealtimeSimulator() {
 
         // 更新数据库
         if (isWebMedia) {
-          await updateWebMediaData(item.id, {
+          await updateWebMediaData(typeof item.id === 'number' ? item.id : Number(item.id) || 0, {
             ...analysisResult,
             analyzedAt: new Date().toISOString(),
           })
         } else {
-          await updateWeiboData(item.id, {
+          await updateWeiboData(typeof item.id === 'number' ? item.id : Number(item.id) || 0, {
             ...analysisResult,
             analyzedAt: new Date().toISOString(),
           })

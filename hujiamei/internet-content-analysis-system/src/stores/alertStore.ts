@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { AlertRule, AlertRecord, AlertRuleType } from '@/interfaces/alert'
-import { db } from '@/db/indexedDB'
+import type { AlertRule, AlertRecord } from '@/interfaces/alert'
 
 /**
  * 预警系统 Store

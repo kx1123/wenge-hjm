@@ -5,9 +5,6 @@ import type {
   AIClientConfig,
   ChatMessage,
   SentimentAnalysisResult,
-  HotWordAnalysis,
-  TopicCluster,
-  EventCorrelation,
 } from '@/interfaces/ai'
 import { getSentimentPrompt } from './prompts/sentiment'
 import { getKeywordsPrompt } from './prompts/keywords'

@@ -346,7 +346,7 @@ import { NButton, useMessage, useDialog } from 'naive-ui'
 import FileUpload from '@/components/FileUpload.vue'
 import { useDataStore } from '@/stores/data'
 
-const router = useRouter()
+const _router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
 const dataStore = useDataStore()

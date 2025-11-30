@@ -149,7 +149,7 @@ function formatDataForPrompt(data: any): string {
 /**
  * 加载报告提示词
  */
-async function loadReportPrompt(type: ReportType, date: string, dataText: string): Promise<string> {
+async function loadReportPrompt(type: ReportType, _date: string, dataText: string): Promise<string> {
   const typeMap = {
     daily: '日报',
     weekly: '周报',
@@ -243,7 +243,7 @@ function generateMockReport(prompt: string): string {
   const negativeRate = total > 0 ? ((totalNegative / total) * 100).toFixed(1) : '0'
   
   // 判断报告类型
-  const isDaily = prompt.includes('日报')
+  const _isDaily = prompt.includes('日报')
   const isWeekly = prompt.includes('周报')
   const isMonthly = prompt.includes('月报')
   const reportType = isWeekly ? '周报' : isMonthly ? '月报' : '日报'
