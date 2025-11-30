@@ -4,13 +4,10 @@
 export interface AIAnalysisResult {
   sentiment: 'positive' | 'neutral' | 'negative'
   sentimentScore?: number // 情感强度评分（0-100）
-  sentimentConfidence?: number // 情感分析置信度（0-1）
-  keywords: string[] // 关键词列表
-  keywordsWithWeight?: KeywordWithWeight[] // 带权重的关键词
+  keywords: string[]
   summary: string
-  category?: string // 舆情分类（投诉/建议/咨询/表扬/中性报道等）
+  category?: string // 舆情分类
   topics?: string[] // 话题标签
-  eventId?: string // 事件ID（用于跨源关联）
 }
 
 /**
@@ -31,14 +28,6 @@ export interface SentimentAnalysisResult {
   sentiment: 'positive' | 'neutral' | 'negative'
   score: number // 情感强度评分（0-100）
   confidence?: number // 置信度（0-1）
-}
-
-/**
- * 关键词结果（带权重）
- */
-export interface KeywordWithWeight {
-  keyword: string
-  weight: number // 权重（0-1）
 }
 
 /**

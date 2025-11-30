@@ -1,21 +1,17 @@
 <template>
-  <div class="report-view">
-    <n-card class="report-main-card">
+  <div class="report-view p-6">
+    <n-card>
       <template #header>
-        <div class="report-header">
-          <h2 class="text-2xl font-bold text-white">数据分析报告</h2>
-        </div>
+        <h2 class="text-2xl font-bold">数据分析报告</h2>
       </template>
 
-      <!-- 控制区域 -->
-      <div class="report-controls">
-        <n-space align="center" :wrap="false">
-          <n-radio-group v-model:value="reportType" size="medium">
-            <n-radio-button value="daily">📅 日报</n-radio-button>
-            <n-radio-button value="weekly">📆 周报</n-radio-button>
-            <n-radio-button value="monthly">📊 月报</n-radio-button>
-          </n-radio-group>
-          
+      <n-space vertical>
+        <n-space>
+          <n-select
+            v-model:value="reportType"
+            :options="reportTypeOptions"
+            style="width: 200px"
+          />
           <n-date-picker
             v-model:value="selectedDate"
             type="date"
@@ -25,85 +21,35 @@
             clearable
             style="width: 200px;"
           />
-          
-          <n-button
-            type="primary"
-            @click="handleGenerateReport"
-            :loading="generating"
-            :disabled="!selectedDate"
-            size="medium"
-          >
-            <template #icon>
-              <span>🚀</span>
-            </template>
+          <n-button type="primary" @click="handleGenerateReport" :loading="generating" :disabled="!selectedDate">
             生成报告
           </n-button>
         </n-space>
-      </div>
 
-      <!-- 生成进度提示 -->
-      <Transition name="fade">
-        <div v-if="generating" class="generating-tip">
-          <n-progress
-            type="line"
-            :percentage="progress"
-            :status="progressStatus"
-            :show-indicator="true"
-          />
-          <div class="progress-text">
-            <n-spin size="small" />
-            <span class="ml-2">{{ progressText }}</span>
+        <n-card v-if="reportContent" title="报告内容">
+          <div class="report-content-wrapper">
+            <div class="report-content" ref="reportContentRef" v-html="renderedContent"></div>
           </div>
-        </div>
-      </Transition>
-
-      <!-- 报告预览区 -->
-      <div class="report-preview" v-if="reportContent || generating">
-        <div class="report-content" ref="reportContentRef" v-html="renderedContent"></div>
-      </div>
-
-      <!-- 空状态 -->
-      <n-empty
-        v-else
-        description="请选择报告类型和日期，然后点击「生成报告」"
-        style="padding: 60px 0;"
-      />
-
-      <!-- 操作按钮 -->
-      <template #footer v-if="reportContent">
-        <div class="report-actions">
-          <n-space justify="end">
-            <n-button @click="handleCopyReport" secondary>
-              <template #icon>
-                <span>📋</span>
-              </template>
-              复制报告
-            </n-button>
-            <n-button type="primary" @click="handleDownloadPDF" :loading="exportingPDF">
-              <template #icon>
-                <span>📄</span>
-              </template>
-              下载 PDF
-            </n-button>
-          </n-space>
-        </div>
-      </template>
+          <template #footer>
+            <n-space justify="end">
+              <n-button @click="handleCopyReport">复制报告</n-button>
+              <n-button type="primary" @click="handleDownloadPDF" :loading="exportingPDF">下载 PDF</n-button>
+            </n-space>
+          </template>
+        </n-card>
+      </n-space>
     </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed } from 'vue'
 import {
   NCard,
   NSpace,
-  NRadioGroup,
-  NRadioButton,
+  NSelect,
   NDatePicker,
   NButton,
-  NProgress,
-  NSpin,
-  NEmpty,
   useMessage,
 } from 'naive-ui'
 import { generateReport, type ReportType } from '@/features/report/reportGenerator'
@@ -113,24 +59,19 @@ import html2canvas from 'html2canvas'
 
 const message = useMessage()
 
-// 报告类型和日期
 const reportType = ref<ReportType>('daily')
 const selectedDate = ref<number | null>(Date.now())
 const reportContent = ref('')
 const reportContentRef = ref<HTMLElement | null>(null)
-
-// 生成状态
 const generating = ref(false)
-const progress = ref(0)
-const progressStatus = ref<'success' | 'error' | 'warning' | 'info'>('info')
-const progressText = ref('准备生成报告...')
-
-// 导出状态
 const exportingPDF = ref(false)
 
-/**
- * 禁用未来日期
- */
+const reportTypeOptions = [
+  { label: '日报', value: 'daily' },
+  { label: '周报', value: 'weekly' },
+  { label: '月报', value: 'monthly' },
+]
+
 function disableDate(timestamp: number): boolean {
   return timestamp > Date.now()
 }
@@ -200,55 +141,85 @@ const handleGenerateReport = async () => {
   }
 
   generating.value = true
-  progress.value = 0
-  progressStatus.value = 'info'
-  progressText.value = '正在聚合数据...'
   reportContent.value = ''
 
   try {
-    // 模拟进度更新
-    const progressInterval = setInterval(() => {
-      if (progress.value < 90) {
-        progress.value += 10
-        if (progress.value < 30) {
-          progressText.value = '正在聚合数据...'
-        } else if (progress.value < 60) {
-          progressText.value = '正在调用 AI 生成报告...'
-        } else {
-          progressText.value = '正在格式化报告内容...'
-        }
-      }
-    }, 500)
-
     const dateStr = dayjs(selectedDate.value).format('YYYY-MM-DD')
-    const startTime = Date.now()
-    
     const content = await generateReport({
       type: reportType.value,
       date: dateStr,
     })
-
-    clearInterval(progressInterval)
-    progress.value = 100
-    progressStatus.value = 'success'
-    progressText.value = `报告生成完成（耗时 ${Math.round((Date.now() - startTime) / 1000)} 秒）`
-
+    
     reportContent.value = content
-
-    // 延迟隐藏进度条
-    setTimeout(() => {
-      generating.value = false
-    }, 2000)
-
     message.success('报告生成成功')
   } catch (error) {
-    progress.value = 100
-    progressStatus.value = 'error'
-    progressText.value = '报告生成失败'
-    generating.value = false
-    
-    console.error('生成报告失败:', error)
     message.error('生成报告失败: ' + (error instanceof Error ? error.message : '未知错误'))
+    console.error(error)
+  } finally {
+    generating.value = false
+  }
+}
+
+async function handleDownloadPDF() {
+  if (!reportContentRef.value) {
+    message.warning('没有可导出的内容')
+    return
+  }
+
+  exportingPDF.value = true
+
+  try {
+    const canvas = await html2canvas(reportContentRef.value, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+    })
+
+    const imgWidth = canvas.width
+    const imgHeight = canvas.height
+    const pdfWidth = 210
+    const pdfHeight = 297
+    const imgAspectRatio = imgWidth / imgHeight
+    
+    let imgPdfWidth = pdfWidth
+    let imgPdfHeight = pdfWidth / imgAspectRatio
+    
+    if (imgPdfHeight > pdfHeight) {
+      imgPdfHeight = pdfHeight
+      imgPdfWidth = pdfHeight * imgAspectRatio
+    }
+
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    })
+
+    const imgData = canvas.toDataURL('image/png', 1.0)
+    const pageHeight = pdf.internal.pageSize.height
+    let heightLeft = imgPdfHeight
+    let position = 0
+
+    pdf.addImage(imgData, 'PNG', (pdfWidth - imgPdfWidth) / 2, position, imgPdfWidth, imgPdfHeight)
+    heightLeft -= pageHeight
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgPdfHeight
+      pdf.addPage()
+      pdf.addImage(imgData, 'PNG', (pdfWidth - imgPdfWidth) / 2, position, imgPdfWidth, imgPdfHeight)
+      heightLeft -= pageHeight
+    }
+
+    const fileName = `舆情分析报告_${reportType.value}_${dayjs(selectedDate.value).format('YYYY-MM-DD')}.pdf`
+    pdf.save(fileName)
+
+    message.success('PDF 导出成功')
+  } catch (error) {
+    console.error('导出 PDF 失败:', error)
+    message.error('导出 PDF 失败: ' + (error instanceof Error ? error.message : '未知错误'))
+  } finally {
+    exportingPDF.value = false
   }
 }
 
@@ -261,218 +232,137 @@ const handleCopyReport = async () => {
   }
 }
 
-/**
- * 导出 PDF
- */
-async function handleDownloadPDF() {
-  if (!reportContentRef.value) {
-    message.warning('没有可导出的内容')
-    return
-  }
-
-  exportingPDF.value = true
-
-  try {
-    // 使用 html2canvas 截图
-    const canvas = await html2canvas(reportContentRef.value, {
-      scale: 2, // 提高清晰度
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-    })
-
-    // 计算 PDF 尺寸（A4: 210mm x 297mm）
-    const imgWidth = canvas.width
-    const imgHeight = canvas.height
-    const pdfWidth = 210 // A4 宽度（mm）
-    const pdfHeight = 297 // A4 高度（mm）
-    const imgAspectRatio = imgWidth / imgHeight
-    const pdfAspectRatio = pdfWidth / pdfHeight
-    
-    // 计算图片在 PDF 中的实际尺寸
-    let imgPdfWidth = pdfWidth
-    let imgPdfHeight = pdfWidth / imgAspectRatio
-    
-    // 如果图片高度超过 PDF 高度，按高度缩放
-    if (imgPdfHeight > pdfHeight) {
-      imgPdfHeight = pdfHeight
-      imgPdfWidth = pdfHeight * imgAspectRatio
-    }
-
-    // 创建 PDF（A4 格式）
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4',
-    })
-
-    const imgData = canvas.toDataURL('image/png', 1.0)
-    
-    // 如果内容超过一页，需要分页
-    const pageHeight = pdf.internal.pageSize.height
-    let heightLeft = imgPdfHeight
-    let position = 0
-
-    // 添加第一页
-    pdf.addImage(imgData, 'PNG', (pdfWidth - imgPdfWidth) / 2, position, imgPdfWidth, imgPdfHeight)
-    heightLeft -= pageHeight
-
-    // 如果还有内容，继续添加页面
-    while (heightLeft > 0) {
-      position = heightLeft - imgPdfHeight
-      pdf.addPage()
-      pdf.addImage(imgData, 'PNG', (pdfWidth - imgPdfWidth) / 2, position, imgPdfWidth, imgPdfHeight)
-      heightLeft -= pageHeight
-    }
-
-    // 保存文件
-    const fileName = `舆情分析报告_${reportType.value}_${dayjs(selectedDate.value).format('YYYY-MM-DD')}.pdf`
-    pdf.save(fileName)
-
-    message.success('PDF 导出成功')
-  } catch (error) {
-    console.error('导出 PDF 失败:', error)
-    message.error('导出 PDF 失败: ' + (error instanceof Error ? error.message : '未知错误'))
-  } finally {
-    exportingPDF.value = false
-  }
-}
 </script>
 
 <style scoped>
 .report-view {
-  @apply w-full h-full p-6;
-  background-color: #0a0a0a;
-  min-height: calc(100vh - 80px);
-}
-
-.report-main-card {
-  @apply bg-gray-900 text-gray-200;
-  max-width: 1400px;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
-.report-header {
-  @apply flex items-center justify-between;
-}
-
-.report-controls {
-  @apply mb-4 pb-4 border-b border-gray-700;
-}
-
-.generating-tip {
-  @apply mb-4 p-4 bg-gray-800 rounded-lg;
-}
-
-.progress-text {
-  @apply flex items-center mt-2 text-sm text-gray-400;
-}
-
-.report-preview {
-  @apply mt-4;
-  max-height: calc(100vh - 400px);
+.report-content-wrapper {
+  max-height: 600px;
   overflow-y: auto;
-  min-height: 400px;
+  padding: 1rem;
+  background-color: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
 }
 
 /* 自定义滚动条 */
-.report-preview::-webkit-scrollbar {
+.report-content-wrapper::-webkit-scrollbar {
   width: 8px;
 }
 
-.report-preview::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
+.report-content-wrapper::-webkit-scrollbar-track {
+  background: #f3f4f6;
   border-radius: 4px;
 }
 
-.report-preview::-webkit-scrollbar-thumb {
-  background: rgba(59, 130, 246, 0.5);
+.report-content-wrapper::-webkit-scrollbar-thumb {
+  background: #9ca3af;
   border-radius: 4px;
 }
 
-.report-preview::-webkit-scrollbar-thumb:hover {
-  background: rgba(59, 130, 246, 0.7);
+.report-content-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
 }
 
 .report-content {
-  @apply p-6 bg-white text-gray-900 rounded-lg;
-  min-height: 400px;
   line-height: 1.8;
+  color: #1f2937;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 /* Markdown 样式 */
 .report-content :deep(h1) {
-  @apply text-3xl font-bold mb-4 mt-6 pb-2 border-b-2 border-gray-300;
-  color: #1f2937;
+  font-size: 24px;
+  font-weight: 700;
+  margin: 24px 0 16px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e5e7eb;
+  color: #111827;
 }
 
 .report-content :deep(h2) {
-  @apply text-2xl font-bold mb-3 mt-5;
-  color: #374151;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 20px 0 12px 0;
+  color: #1f2937;
 }
 
 .report-content :deep(h3) {
-  @apply text-xl font-semibold mb-2 mt-4;
-  color: #4b5563;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 16px 0 8px 0;
+  color: #374151;
 }
 
 .report-content :deep(p) {
-  @apply mb-3;
+  margin: 12px 0;
   color: #1f2937;
+  word-wrap: break-word;
 }
 
 .report-content :deep(strong) {
-  @apply font-bold;
-  color: #1f2937;
+  font-weight: 600;
+  color: #111827;
 }
 
 .report-content :deep(em) {
-  @apply italic;
+  font-style: italic;
 }
 
 .report-content :deep(code) {
-  @apply bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono;
+  background-color: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
   color: #dc2626;
 }
 
 .report-content :deep(pre) {
-  @apply bg-gray-100 p-4 rounded my-3 overflow-x-auto;
+  background-color: #f9fafb;
+  padding: 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 16px 0;
+  border: 1px solid #e5e7eb;
 }
 
 .report-content :deep(pre code) {
-  @apply bg-transparent p-0 text-gray-800;
+  background-color: transparent;
+  padding: 0;
+  color: #1f2937;
+  font-size: 13px;
 }
 
 .report-content :deep(ul),
 .report-content :deep(ol) {
-  @apply my-3 ml-6;
+  margin: 12px 0;
+  padding-left: 24px;
 }
 
 .report-content :deep(li) {
-  @apply mb-1;
+  margin: 6px 0;
+  color: #1f2937;
 }
 
 .report-content :deep(a) {
-  @apply text-blue-600 hover:text-blue-800 underline;
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.report-content :deep(a:hover) {
+  color: #1d4ed8;
 }
 
 .report-content :deep(hr) {
-  @apply my-4 border-gray-300;
-}
-
-.report-actions {
-  @apply pt-4 border-t border-gray-700;
-}
-
-/* 动画 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+  margin: 24px 0;
+  border: none;
+  border-top: 1px solid #e5e7eb;
 }
 </style>
 

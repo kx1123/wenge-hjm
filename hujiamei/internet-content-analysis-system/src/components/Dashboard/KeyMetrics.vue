@@ -147,15 +147,27 @@ const formatNumber = (num: number): string => {
 
 <style scoped>
 .key-metrics {
-  @apply mb-4;
+  margin-bottom: 2rem;
 }
 
 .metrics-grid {
-  @apply grid grid-cols-4 gap-4;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
 }
 
 .metric-card {
-  @apply p-4 bg-gray-800 border border-blue-500/30 rounded-lg backdrop-blur-sm flex items-center gap-3 transition-all relative overflow-hidden shadow-[0_0_10px_rgba(59,130,246,0.3)];
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.2) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
 }
 
 .metric-card::before {

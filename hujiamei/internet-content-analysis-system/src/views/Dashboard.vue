@@ -1,328 +1,386 @@
 <template>
-  <div class="dashboard-container">
-    <!-- 顶部：关键指标 -->
-    <div ref="headerRef" class="dashboard-header">
-      <KeyMetrics />
+  <div class="dashboard-view">
+    <!-- 背景装饰 -->
+    <div class="dashboard-bg">
+      <div class="grid-pattern"></div>
+      <div class="glow-effect"></div>
     </div>
 
-    <!-- 主内容区：按行布局 -->
-    <div class="dashboard-grid">
-      <!-- 第二行：4个图表 -->
-      <div class="chart-row chart-row-4">
-        <TrendChart />
-        <DataSourcePie />
-        <SentimentPie title="网媒情感" type="webmedia" />
-        <SentimentPie title="微博情感" type="weibo" />
+    <!-- 主内容区 -->
+    <div class="dashboard-content">
+      <!-- 标题栏 -->
+      <div class="dashboard-header">
+        <div class="header-left">
+          <h1 class="dashboard-title">
+            <span class="title-icon">📊</span>
+            <span class="title-text">数据大屏</span>
+            <span class="title-subtitle">Data Dashboard</span>
+          </h1>
+        </div>
+        <div class="header-right">
+          <n-space>
+            <n-button
+              :type="simulator.isRunning ? 'error' : 'primary'"
+              size="large"
+              round
+              @click="simulator.isRunning ? simulator.stop() : simulator.start()"
+            >
+              <template #icon>
+                <span>{{ simulator.isRunning ? '⏹' : '▶' }}</span>
+              </template>
+              {{ simulator.isRunning ? '停止模拟实时' : '启动模拟实时' }}
+            </n-button>
+            <n-tag v-if="simulator.latestItem" type="info" :bordered="false" size="large">
+              <span class="tag-icon">⚡</span>
+              <span>最新: {{ simulator.latestItem.type === 'webmedia' ? '网媒' : '微博' }}</span>
+              <span v-if="simulator.latestItem.isNew" class="new-badge-header">NEW</span>
+            </n-tag>
+          </n-space>
+        </div>
       </div>
 
-      <!-- 第三行：3个图表 -->
-      <div class="chart-row chart-row-3">
-        <KeywordCloud />
-        <MediaDistribution />
-        <HotList title="热门报道 Top10" type="webmedia" />
+      <!-- 实时数据流 -->
+      <div v-if="simulator.isRunning" class="realtime-section">
+        <div class="section-title">
+          <span class="title-line"></span>
+          <span class="title-text">实时数据流</span>
+          <span class="title-line"></span>
+        </div>
+        <div class="realtime-stream">
+          <div
+            v-for="item in simulator.simulatedData.value.slice(0, 10)"
+            :key="`${item.type}-${item.id}`"
+            class="stream-item"
+            :class="{ 'stream-item-new': item.isNew }"
+          >
+            <n-tag :type="item.type === 'webmedia' ? 'primary' : 'success'" size="small">
+              {{ item.type === 'webmedia' ? '网媒' : '微博' }}
+            </n-tag>
+            <span v-if="item.isNew" class="new-badge">NEW</span>
+            <span class="stream-content">
+              {{ getItemContent(item) }}
+            </span>
+            <span class="stream-time">
+              {{ formatTime(item.timestamp) }}
+            </span>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <!-- 控制按钮（固定右下） -->
-    <div class="control-buttons">
-      <button
-        @click="simulator.start()"
-        :disabled="simulator.status === 'running'"
-        class="control-btn control-btn-primary"
-      >
-        <span class="control-icon">▶</span>
-        <span>启动模拟</span>
-      </button>
-      <button
-        @click="simulator.pause()"
-        :disabled="simulator.status !== 'running'"
-        class="control-btn control-btn-secondary"
-      >
-        <span class="control-icon">⏸</span>
-        <span>暂停</span>
-      </button>
+      <!-- 实时分析大屏 -->
+      <RealtimeDashboard />
+
+      <!-- 预警面板 -->
+      <AlertPanel />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, watch, ref, onUnmounted } from 'vue'
-import KeyMetrics from '@/components/Dashboard/KeyMetrics.vue'
-import TrendChart from '@/components/Dashboard/TrendChart.vue'
-import SentimentPie from '@/components/Dashboard/SentimentPie.vue'
-import HotList from '@/components/Dashboard/HotList.vue'
-import DataSourcePie from '@/components/Dashboard/DataSourcePie.vue'
-import KeywordCloud from '@/components/Dashboard/KeywordCloud.vue'
-import MediaDistribution from '@/components/Dashboard/MediaDistribution.vue'
+import { onMounted } from 'vue'
+import { NCard, NButton, NSpace, NTag } from 'naive-ui'
+import RealtimeDashboard from '@/components/Dashboard/RealtimeDashboard.vue'
+import AlertPanel from '@/components/Dashboard/AlertPanel.vue'
 import { useRealtimeSimulator } from '@/composables/useRealtimeSimulator'
 import { useDataStore } from '@/stores/data'
+import type { WebMediaData, WeiboData } from '@/interfaces/data'
+import dayjs from 'dayjs'
 
 const simulator = useRealtimeSimulator()
 const dataStore = useDataStore()
-const headerRef = ref<HTMLElement | null>(null)
-const headerHeight = ref(120)
-
-// 动态计算 header 高度
-const updateHeaderHeight = () => {
-  if (headerRef.value) {
-    headerHeight.value = headerRef.value.offsetHeight
-    document.documentElement.style.setProperty('--header-height', `${headerHeight.value}px`)
-  }
-}
-
-// 数据流：监听最新数据，自动更新 store
-watch(
-  () => simulator.latest.value,
-  (data) => {
-    if (data) {
-      // 数据已通过 simulator 自动更新到 store
-      // 这里可以添加额外的处理逻辑
-    }
-  }
-)
 
 // 加载数据
 onMounted(async () => {
   await dataStore.loadAll()
-  // 等待 DOM 渲染后计算高度
-  setTimeout(() => {
-    updateHeaderHeight()
-  }, 100)
-  
-  // 监听窗口大小变化
-  window.addEventListener('resize', updateHeaderHeight)
 })
 
-onUnmounted(() => {
-  window.removeEventListener('resize', updateHeaderHeight)
-})
+const formatTime = (time: string) => {
+  return dayjs(time).format('HH:mm:ss')
+}
+
+const getItemContent = (item: { type: 'webmedia' | 'weibo'; data: WebMediaData | WeiboData }) => {
+  if (item.type === 'webmedia') {
+    const webmediaData = item.data as WebMediaData
+    return webmediaData.title || webmediaData.content
+  } else {
+    const weiboData = item.data as WeiboData
+    return weiboData.content.substring(0, 50)
+  }
+}
 </script>
 
 <style scoped>
-.dashboard-container {
-  @apply h-screen w-screen bg-gray-900 text-gray-200 font-sans overflow-hidden;
-  background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1419 100%);
+.dashboard-view {
   position: relative;
-  display: flex;
-  flex-direction: column;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1419 100%);
+  color: #ffffff;
+  padding: 2rem;
+  overflow-x: hidden;
 }
 
 /* 背景装饰 */
-.dashboard-container::before {
-  content: '';
+.dashboard-bg {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background-image: 
-    linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
+  z-index: 0;
+  pointer-events: none;
+}
+
+.grid-pattern {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-image: linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
   background-size: 50px 50px;
-  pointer-events: none;
-  z-index: 0;
+  animation: gridMove 20s linear infinite;
 }
 
+@keyframes gridMove {
+  0% {
+    transform: translate(0, 0);
+  }
+  100% {
+    transform: translate(50px, 50px);
+  }
+}
+
+.glow-effect {
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(0, 255, 255, 0.1) 0%, transparent 70%);
+  top: -250px;
+  right: -250px;
+  animation: glowPulse 4s ease-in-out infinite;
+}
+
+@keyframes glowPulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+}
+
+/* 主内容 */
+.dashboard-content {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 标题栏 */
 .dashboard-header {
-  @apply p-4 relative z-10;
-  min-height: 100px;
-  flex-shrink: 0;
-}
-
-.dashboard-grid {
-  @apply flex flex-col gap-4 px-4 relative z-10;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scroll-behavior: smooth;
-  padding-bottom: 100px; /* 为控制按钮留出空间 */
-}
-
-/* 自定义滚动条样式 */
-.dashboard-grid::-webkit-scrollbar {
-  width: 8px;
-}
-
-.dashboard-grid::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 4px;
-}
-
-.dashboard-grid::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #3b82f6 0%, #8b5cf6 100%);
-  border-radius: 4px;
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
-}
-
-.dashboard-grid::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #2563eb 0%, #7c3aed 100%);
-  box-shadow: 0 0 15px rgba(59, 130, 246, 0.8);
-}
-
-/* 图表行布局 */
-.chart-row {
-  @apply grid gap-4;
-  width: 100%;
-  flex: 1 1 0;
-  min-height: 0;
-}
-
-/* 第二行：4个图表 */
-.chart-row-4 {
-  grid-template-columns: repeat(4, 1fr);
-}
-
-/* 第三行：3个图表 */
-.chart-row-3 {
-  grid-template-columns: repeat(3, 1fr);
-}
-
-/* 确保图表卡片统一高度和对齐 */
-.chart-row > * {
-  flex-shrink: 0;
-  width: 100%;
-  min-height: 0;
   display: flex;
-  flex-direction: column;
-  height: 100%;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(0, 255, 255, 0.1) 0%, rgba(138, 43, 226, 0.1) 100%);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
-/* 统一图表高度 */
-.chart-row > * {
-  flex: 1 1 0;
-  min-height: 320px;
-  max-height: none;
+.dashboard-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #00ffff 0%, #8a2be2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
-/* 控制按钮 */
-.control-buttons {
-  @apply fixed bottom-6 right-6 z-50 flex gap-3;
-  pointer-events: auto;
+.title-icon {
+  font-size: 2.5rem;
+  filter: drop-shadow(0 0 10px rgba(0, 255, 255, 0.5));
 }
 
-.control-btn {
-  @apply px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-300 flex items-center gap-2;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+.title-text {
+  position: relative;
+}
+
+.title-subtitle {
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 400;
+  margin-left: 0.5rem;
+}
+
+.tag-icon {
+  margin-right: 0.25rem;
+}
+
+.new-badge-header {
+  display: inline-block;
+  padding: 2px 6px;
+  background-color: #ff4444;
+  color: white;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: bold;
+  margin-left: 0.5rem;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* 实时数据流区域 */
+.realtime-section {
+  margin-bottom: 2rem;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.title-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(0, 255, 255, 0.5) 50%, transparent 100%);
+}
+
+.section-title .title-text {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #00ffff;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.realtime-stream {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 1rem;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.2) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
   backdrop-filter: blur(10px);
 }
 
-.control-btn:not(:disabled):hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.4);
+.realtime-stream::-webkit-scrollbar {
+  width: 6px;
 }
 
-.control-btn:disabled {
-  @apply opacity-50 cursor-not-allowed;
+.realtime-stream::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
 }
 
-.control-btn-primary {
-  @apply bg-blue-600 hover:bg-blue-700;
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+.realtime-stream::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 255, 0.3);
+  border-radius: 3px;
 }
 
-.control-btn-primary:not(:disabled):hover {
-  box-shadow: 0 0 30px rgba(59, 130, 246, 0.6);
+.realtime-stream::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 255, 0.5);
 }
 
-.control-btn-secondary {
-  @apply bg-gray-700 hover:bg-gray-600;
-  box-shadow: 0 0 15px rgba(107, 114, 128, 0.3);
+.stream-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.3) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
 }
 
-.control-icon {
-  @apply text-base;
+.stream-item:hover {
+  border-color: rgba(0, 255, 255, 0.3);
+  box-shadow: 0 4px 20px rgba(0, 255, 255, 0.2);
+  transform: translateX(4px);
 }
 
-/* 响应式适配 */
-@media (max-width: 1920px) {
-  .dashboard-grid {
-    gap: 1rem;
-  }
-  
-  .chart-row {
-    gap: 1rem;
-  }
+.stream-item-new {
+  background: linear-gradient(135deg, rgba(255, 170, 0, 0.2) 0%, rgba(255, 170, 0, 0.1) 100%);
+  border: 2px solid rgba(255, 170, 0, 0.5);
+  animation: highlight 2s ease-in-out;
+  box-shadow: 0 0 20px rgba(255, 170, 0, 0.3);
 }
 
-@media (max-width: 1600px) {
-  .chart-row-4 {
-    grid-template-columns: repeat(2, 1fr);
+@keyframes highlight {
+  0%,
+  100% {
+    background: linear-gradient(135deg, rgba(255, 170, 0, 0.2) 0%, rgba(255, 170, 0, 0.1) 100%);
+    box-shadow: 0 0 20px rgba(255, 170, 0, 0.3);
   }
-  
-  .chart-row-3 {
-    grid-template-columns: repeat(3, 1fr);
-  }
-  
-  .chart-row > * {
-    min-height: 300px;
-  }
-}
-
-@media (max-width: 1440px) {
-  .dashboard-grid {
-    gap: 1.5rem;
-    padding-bottom: 20px;
-  }
-  
-  .chart-row-4 {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  
-  .chart-row-3 {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  
-  .dashboard-header {
-    height: auto;
-    min-height: 80px;
-  }
-  
-  .chart-row > * {
-    min-height: 300px;
-    max-height: 400px;
+  50% {
+    background: linear-gradient(135deg, rgba(255, 170, 0, 0.3) 0%, rgba(255, 170, 0, 0.2) 100%);
+    box-shadow: 0 0 30px rgba(255, 170, 0, 0.5);
   }
 }
 
+.new-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+  color: white;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: bold;
+  box-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.stream-content {
+  flex: 1;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-time {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: 'Courier New', monospace;
+  min-width: 80px;
+  text-align: right;
+}
+
+/* 响应式 */
 @media (max-width: 768px) {
-  .dashboard-header {
-    @apply p-2;
-    height: auto;
+  .dashboard-view {
+    padding: 1rem;
   }
-  
-  .dashboard-grid {
-    @apply px-2;
-    gap: 1rem;
-    padding-bottom: 80px;
-  }
-  
-  .chart-row-4,
-  .chart-row-3 {
-    grid-template-columns: 1fr;
-  }
-  
-  .control-buttons {
-    @apply bottom-4 right-4;
-    flex-direction: column;
-  }
-  
-  .control-btn {
-    @apply px-4 py-2 text-xs;
-  }
-}
 
-/* 大屏优化（≥1920px） */
-@media (min-width: 1920px) {
-  .dashboard-grid {
-    gap: 1.5rem;
-  }
-  
-  .chart-row {
-    gap: 1.5rem;
-  }
-  
-  .chart-row > * {
-    min-height: 380px;
+  .dashboard-header {
+    flex-direction: column;
+    gap: 1rem;
+    text-align: center;
   }
 }
 </style>
+

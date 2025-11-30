@@ -57,18 +57,7 @@
           <router-view />
         </n-layout-content>
 
-        <!-- 预警 Toast -->
-        <AlertToast
-          v-for="toast in activeToasts"
-          :key="toast.id"
-          :level="toast.level"
-          :title="toast.title"
-          :message="toast.message"
-          :duration="toast.duration"
-          @close="removeToast(toast.id)"
-        />
-
-        <!-- AI聊天助手（固定在底部） -->
+        <!-- AI聊天助手（固定在右下角） -->
         <Transition name="slide-up">
           <div v-if="showChatPanel" class="ai-chat-container">
             <AIChatPanel :on-send="handleChatSend" />
@@ -108,7 +97,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onMounted } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NConfigProvider,
@@ -122,25 +111,21 @@ import {
   darkTheme,
 } from 'naive-ui'
 import AIChatPanel from '@/components/AIChatPanel.vue'
-import AlertToast from '@/components/Alert/AlertToast.vue'
-import { useAlertStore } from '@/stores/alertStore'
 import { createChatEngine } from '@/ai/chatEngine'
-import { db } from '@/db/indexedDB'
-import type { AlertLevel } from '@/interfaces/alert'
+import type { ChatMessage } from '@/interfaces/ai'
 
 const route = useRoute()
 const router = useRouter()
-const alertStore = useAlertStore()
 
 const currentRoute = computed(() => route.path)
 const theme = darkTheme
 
 // 聊天助手状态
-const showChatPanel = ref(true) // 默认显示
-const chatEngine = createChatEngine(db)
+const showChatPanel = ref(false) // 默认隐藏
+const chatEngine = createChatEngine()
 
 // 处理聊天消息
-async function handleChatSend(message: string, history: any[] = []): Promise<{ content: string }> {
+async function handleChatSend(message: string, history: ChatMessage[] = []): Promise<{ content: string }> {
   try {
     // 使用 chatEngine 发送消息并返回回复，传递历史消息以支持多轮对话
     const reply = await chatEngine.sendMessage(message, history)
@@ -150,54 +135,6 @@ async function handleChatSend(message: string, history: any[] = []): Promise<{ c
     throw error
   }
 }
-
-// 预警 Toast 管理
-interface ToastItem {
-  id: string
-  level: AlertLevel
-  title: string
-  message: string
-  duration: number
-}
-
-const activeToasts = ref<ToastItem[]>([])
-let lastAlertCount = 0
-
-// 监听新预警
-watch(
-  () => alertStore.alerts.length,
-  (newCount) => {
-    if (newCount > lastAlertCount) {
-      // 有新预警，显示 Toast
-      const newAlerts = alertStore.alerts.slice(0, newCount - lastAlertCount)
-      for (const alert of newAlerts.reverse()) {
-        // 只显示未处理的严重和警告级别预警
-        if (alert.status === 'unhandled' && (alert.level === 'critical' || alert.level === 'warning')) {
-          activeToasts.value.push({
-            id: alert.id,
-            level: alert.level,
-            title: alert.title,
-            message: alert.message,
-            duration: alert.level === 'critical' ? 8000 : 5000,
-          })
-        }
-      }
-    }
-    lastAlertCount = newCount
-  }
-)
-
-const removeToast = (id: string) => {
-  const index = activeToasts.value.findIndex((t) => t.id === id)
-  if (index !== -1) {
-    activeToasts.value.splice(index, 1)
-  }
-}
-
-onMounted(async () => {
-  await alertStore.init()
-  lastAlertCount = alertStore.alerts.length
-})
 </script>
 
 <style>
@@ -249,12 +186,15 @@ body {
   bottom: 20px;
   right: 20px;
   width: 400px;
-  height: 500px;
+  min-height: 500px;
   max-height: calc(100vh - 40px);
+  height: auto;
   z-index: 1000;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   border-radius: 8px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .close-chat-btn {

@@ -1,187 +1,152 @@
 <template>
   <div class="alert-rule-editor">
-    <n-card title="预警规则配置" class="rule-card">
-      <n-tabs v-model:value="activeTab" type="line">
-        <!-- 关键词预警 -->
-        <n-tab-pane name="keyword" tab="关键词预警">
-          <div class="rule-section">
-            <n-form-item label="关键词列表">
-              <n-input
-                v-model:value="keywordInput"
-                type="textarea"
-                placeholder="输入关键词，用逗号分隔，支持正则表达式"
-                :rows="3"
+    <n-card title="预警规则管理" class="rule-card">
+      <template #header-extra>
+        <n-button type="primary" @click="showAddDialog = true">
+          <template #icon>
+            <span>➕</span>
+          </template>
+          添加规则
+        </n-button>
+      </template>
+
+      <n-data-table
+        :columns="columns"
+        :data="alertStore.rules"
+        :pagination="false"
+      />
+
+      <!-- 添加/编辑规则对话框 -->
+      <n-modal v-model:show="showAddDialog" preset="dialog" title="添加预警规则" style="width: 600px">
+        <n-form :model="formData" :rules="formRules" ref="formRef" label-placement="left" label-width="120px">
+          <n-form-item label="规则类型" path="type">
+            <n-select
+              v-model:value="formData.type"
+              :options="ruleTypeOptions"
+              placeholder="选择规则类型"
+              @update:value="handleTypeChange"
+            />
+          </n-form-item>
+
+          <n-form-item label="规则名称" path="description">
+            <n-input v-model:value="formData.description" placeholder="输入规则名称" />
+          </n-form-item>
+
+          <!-- 关键词规则 -->
+          <template v-if="formData.type === 'keyword'">
+            <n-form-item label="关键词" path="keywords">
+              <n-dynamic-input
+                v-model:value="formData.keywords"
+                :min="1"
+                placeholder="输入关键词，按回车添加"
               />
             </n-form-item>
-            <n-form-item label="使用正则">
-              <n-switch v-model:value="keywordRegex" />
-            </n-form-item>
-            <n-form-item label="预警级别">
-              <n-select v-model:value="keywordLevel" :options="levelOptions" />
-            </n-form-item>
-            <n-form-item label="描述">
-              <n-input v-model:value="keywordDesc" placeholder="规则描述（可选）" />
-            </n-form-item>
-            <n-button type="primary" @click="addKeywordRule">添加规则</n-button>
-          </div>
-        </n-tab-pane>
+          </template>
 
-        <!-- 情感预警 -->
-        <n-tab-pane name="sentiment" tab="情感预警">
-          <div class="rule-section">
-            <n-form-item label="情感类型">
-              <n-select v-model:value="sentimentType" :options="sentimentOptions" />
+          <!-- 情感规则 -->
+          <template v-if="formData.type === 'sentiment'">
+            <n-form-item label="情感类型" path="sentiment">
+              <n-select
+                v-model:value="formData.sentiment"
+                :options="sentimentOptions"
+                placeholder="选择情感类型"
+              />
             </n-form-item>
-            <n-form-item label="得分阈值">
+            <n-form-item label="阈值" path="threshold">
               <n-input-number
-                v-model:value="sentimentScoreThreshold"
+                v-model:value="formData.threshold"
                 :min="0"
                 :max="100"
-                placeholder="低于此值触发（0-100）"
+                placeholder="情感分数阈值（0-100）"
+                style="width: 100%"
               />
             </n-form-item>
-            <n-form-item label="置信度阈值">
+            <n-form-item label="时间窗口（分钟）" path="timeWindow">
               <n-input-number
-                v-model:value="sentimentConfidenceThreshold"
-                :min="0"
-                :max="1"
-                :step="0.1"
-                placeholder="高于此值触发（0-1）"
-              />
-            </n-form-item>
-            <n-form-item label="预警级别">
-              <n-select v-model:value="sentimentLevel" :options="levelOptions" />
-            </n-form-item>
-            <n-form-item label="描述">
-              <n-input v-model:value="sentimentDesc" placeholder="规则描述（可选）" />
-            </n-form-item>
-            <n-button type="primary" @click="addSentimentRule">添加规则</n-button>
-          </div>
-        </n-tab-pane>
-
-        <!-- 量激增预警 -->
-        <n-tab-pane name="volume" tab="量激增预警">
-          <div class="rule-section">
-            <n-form-item label="数量阈值">
-              <n-input-number
-                v-model:value="volumeThreshold"
+                v-model:value="formData.timeWindow"
                 :min="1"
-                placeholder="条数"
+                placeholder="时间窗口"
+                style="width: 100%"
               />
             </n-form-item>
-            <n-form-item label="时间窗口（分钟）">
-              <n-input-number
-                v-model:value="volumeTimeWindow"
-                :min="1"
-                placeholder="分钟"
-              />
-            </n-form-item>
-            <n-form-item label="预警级别">
-              <n-select v-model:value="volumeLevel" :options="levelOptions" />
-            </n-form-item>
-            <n-form-item label="描述">
-              <n-input v-model:value="volumeDesc" placeholder="规则描述（可选）" />
-            </n-form-item>
-            <n-button type="primary" @click="addVolumeRule">添加规则</n-button>
-          </div>
-        </n-tab-pane>
+          </template>
 
-        <!-- 传播预警 -->
-        <n-tab-pane name="propagation" tab="传播预警">
-          <div class="rule-section">
-            <n-form-item label="时间窗口（分钟）">
+          <!-- 量激增规则 -->
+          <template v-if="formData.type === 'volume'">
+            <n-form-item label="阈值（条数）" path="threshold">
               <n-input-number
-                v-model:value="propagationTimeWindow"
+                v-model:value="formData.threshold"
                 :min="1"
-                placeholder="分钟（默认10分钟）"
+                placeholder="触发预警的数据量"
+                style="width: 100%"
               />
             </n-form-item>
-            <n-form-item label="最少跨源数量">
+            <n-form-item label="时间窗口（分钟）" path="timeWindow">
               <n-input-number
-                v-model:value="propagationMinSources"
-                :min="2"
-                :max="2"
-                placeholder="最少跨源数量（默认2：网媒+微博）"
+                v-model:value="formData.timeWindow"
+                :min="1"
+                placeholder="时间窗口"
+                style="width: 100%"
               />
             </n-form-item>
-            <n-form-item label="预警级别">
-              <n-select v-model:value="propagationLevel" :options="levelOptions" />
-            </n-form-item>
-            <n-form-item label="描述">
-              <n-input v-model:value="propagationDesc" placeholder="规则描述（可选）" />
-            </n-form-item>
-            <n-button type="primary" @click="addPropagationRule">添加规则</n-button>
-          </div>
-        </n-tab-pane>
-      </n-tabs>
+          </template>
 
-      <!-- 规则列表 -->
-      <div class="rules-list">
-        <n-divider>已配置规则</n-divider>
-        <n-list>
-          <n-list-item v-for="rule in rules" :key="rule.id">
-            <div class="rule-item">
-              <div class="rule-info">
-                <n-tag :type="getRuleTypeTag(rule.type)">{{ getRuleTypeName(rule.type) }}</n-tag>
-                <AlertBadge :level="rule.severity" />
-                <span class="rule-desc">{{ rule.description || '无描述' }}</span>
-                <n-switch
-                  v-model:value="rule.enabled"
-                  @update:value="updateRuleEnabled(rule.id, $event)"
-                />
-              </div>
-              <n-button size="small" type="error" @click="deleteRule(rule.id)">删除</n-button>
-            </div>
-          </n-list-item>
-        </n-list>
-      </div>
+          <n-form-item label="预警级别" path="severity">
+            <n-select
+              v-model:value="formData.severity"
+              :options="severityOptions"
+              placeholder="选择预警级别"
+            />
+          </n-form-item>
+
+          <n-form-item label="启用状态" path="enabled">
+            <n-switch v-model:value="formData.enabled" />
+          </n-form-item>
+        </n-form>
+
+        <template #action>
+          <n-space>
+            <n-button @click="showAddDialog = false">取消</n-button>
+            <n-button type="primary" @click="handleSaveRule">保存</n-button>
+          </n-space>
+        </template>
+      </n-modal>
     </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { NCard, NTabs, NTabPane, NFormItem, NInput, NInputNumber, NSelect, NButton, NList, NListItem, NTag, NSwitch, NDivider, useMessage } from 'naive-ui'
-import AlertBadge from '@/components/ui/AlertBadge.vue'
+import { ref, h, reactive } from 'vue'
+import {
+  NCard,
+  NDataTable,
+  NButton,
+  NModal,
+  NForm,
+  NFormItem,
+  NInput,
+  NSelect,
+  NInputNumber,
+  NSwitch,
+  NDynamicInput,
+  NSpace,
+  NTag,
+  NPopconfirm,
+  useMessage,
+} from 'naive-ui'
 import { useAlertStore } from '@/stores/alertStore'
-import type { AlertLevel } from '@/interfaces/alert'
+import type { AlertRule } from '@/interfaces/alert'
 
 const alertStore = useAlertStore()
 const message = useMessage()
+const formRef = ref<any>(null)
+const showAddDialog = ref(false)
+const editingRule = ref<AlertRule | null>(null)
 
-const activeTab = ref('keyword')
-
-// 关键词规则
-const keywordInput = ref('')
-const keywordRegex = ref(false)
-const keywordLevel = ref<AlertLevel>('warning')
-const keywordDesc = ref('')
-
-// 情感规则
-const sentimentType = ref<'negative' | 'neutral'>('negative')
-const sentimentScoreThreshold = ref(30)
-const sentimentConfidenceThreshold = ref(0.8)
-const sentimentLevel = ref<AlertLevel>('warning')
-const sentimentDesc = ref('')
-
-// 量激增规则
-const volumeThreshold = ref(50)
-const volumeTimeWindow = ref(5)
-const volumeLevel = ref<AlertLevel>('warning')
-const volumeDesc = ref('')
-
-// 传播规则
-const propagationTimeWindow = ref(10)
-const propagationMinSources = ref(2)
-const propagationLevel = ref<AlertLevel>('warning')
-const propagationDesc = ref('')
-
-const rules = ref(alertStore.rules)
-
-const levelOptions = [
-  { label: '严重', value: 'critical' },
-  { label: '警告', value: 'warning' },
-  { label: '信息', value: 'info' },
+const ruleTypeOptions = [
+  { label: '关键词预警', value: 'keyword' },
+  { label: '情感预警', value: 'sentiment' },
+  { label: '量激增预警', value: 'volume' },
 ]
 
 const sentimentOptions = [
@@ -189,163 +154,223 @@ const sentimentOptions = [
   { label: '中性', value: 'neutral' },
 ]
 
-onMounted(async () => {
-  await alertStore.loadRules()
-  rules.value = alertStore.rules
+const severityOptions = [
+  { label: '严重', value: 'high' },
+  { label: '警告', value: 'medium' },
+  { label: '提示', value: 'low' },
+]
+
+const formData = reactive<Partial<AlertRule> & { keywords?: string[] }>({
+  type: 'keyword',
+  description: '',
+  enabled: true,
+  severity: 'medium',
+  keywords: [],
+  sentiment: 'negative',
+  threshold: 30,
+  timeWindow: 60,
 })
 
-const addKeywordRule = async () => {
-  if (!keywordInput.value.trim()) {
-    message.warning('请输入关键词')
-    return
-  }
-  
-  const keywords = keywordInput.value.split(/[,，]/).map((k) => k.trim()).filter(Boolean)
-  
-  try {
-    await alertStore.addRule({
-      type: 'keyword',
-      keywords,
-      regex: keywordRegex.value,
-      enabled: true,
-      severity: keywordLevel.value,
-      description: keywordDesc.value,
-    })
-    
-    message.success('关键词规则添加成功')
-    keywordInput.value = ''
-    keywordDesc.value = ''
-    rules.value = alertStore.rules
-  } catch (err) {
-    message.error('添加规则失败')
+const formRules = {
+  type: { required: true, message: '请选择规则类型', trigger: 'change' },
+  description: { required: true, message: '请输入规则名称', trigger: 'blur' },
+}
+
+function handleTypeChange() {
+  // 重置表单数据
+  if (formData.type === 'keyword') {
+    formData.keywords = []
+  } else if (formData.type === 'sentiment') {
+    formData.sentiment = 'negative'
+    formData.threshold = 30
+    formData.timeWindow = 60
+  } else if (formData.type === 'volume') {
+    formData.threshold = 50
+    formData.timeWindow = 5
   }
 }
 
-const addSentimentRule = async () => {
-  try {
-    await alertStore.addRule({
-      type: 'sentiment',
-      sentiment: sentimentType.value,
-      scoreThreshold: sentimentScoreThreshold.value,
-      confidenceThreshold: sentimentConfidenceThreshold.value,
-      enabled: true,
-      severity: sentimentLevel.value,
-      description: sentimentDesc.value,
-    })
-    
-    message.success('情感规则添加成功')
-    sentimentDesc.value = ''
-    rules.value = alertStore.rules
-  } catch (err) {
-    message.error('添加规则失败')
-  }
+function handleSaveRule() {
+  formRef.value?.validate((errors: any) => {
+    if (!errors) {
+      const rule: AlertRule = {
+        id: editingRule.value?.id || `rule-${Date.now()}`,
+        type: formData.type!,
+        enabled: formData.enabled ?? true,
+        severity: formData.severity!,
+        description: formData.description,
+        ...(formData.type === 'keyword' && { keywords: formData.keywords || [] }),
+        ...(formData.type === 'sentiment' && {
+          sentiment: formData.sentiment!,
+          threshold: formData.threshold!,
+          timeWindow: formData.timeWindow!,
+        }),
+        ...(formData.type === 'volume' && {
+          threshold: formData.threshold!,
+          timeWindow: formData.timeWindow!,
+        }),
+      } as AlertRule
+
+      if (editingRule.value) {
+        alertStore.updateRule(rule.id, rule)
+        message.success('规则更新成功')
+      } else {
+        alertStore.addRule(rule)
+        message.success('规则添加成功')
+      }
+
+      showAddDialog.value = false
+      resetForm()
+    }
+  })
 }
 
-const addVolumeRule = async () => {
-  try {
-    await alertStore.addRule({
-      type: 'volume',
-      threshold: volumeThreshold.value,
-      timeWindow: volumeTimeWindow.value,
-      enabled: true,
-      severity: volumeLevel.value,
-      description: volumeDesc.value,
-    })
-    
-    message.success('量激增规则添加成功')
-    volumeDesc.value = ''
-    rules.value = alertStore.rules
-  } catch (err) {
-    message.error('添加规则失败')
-  }
+function resetForm() {
+  editingRule.value = null
+  formData.type = 'keyword'
+  formData.description = ''
+  formData.enabled = true
+  formData.severity = 'medium'
+  formData.keywords = []
+  formData.sentiment = 'negative'
+  formData.threshold = 30
+  formData.timeWindow = 60
 }
 
-const addPropagationRule = async () => {
-  try {
-    await alertStore.addRule({
-      type: 'propagation',
-      timeWindow: propagationTimeWindow.value,
-      minSources: propagationMinSources.value,
-      enabled: true,
-      severity: propagationLevel.value,
-      description: propagationDesc.value,
-    })
-    
-    message.success('传播规则添加成功')
-    propagationDesc.value = ''
-    rules.value = alertStore.rules
-  } catch (err) {
-    message.error('添加规则失败')
+function handleEdit(rule: AlertRule) {
+  editingRule.value = rule
+  formData.type = rule.type
+  formData.description = rule.description
+  formData.enabled = rule.enabled
+  formData.severity = rule.severity
+  if (rule.type === 'keyword') {
+    formData.keywords = [...rule.keywords]
+  } else if (rule.type === 'sentiment') {
+    formData.sentiment = rule.sentiment
+    formData.threshold = rule.threshold
+    formData.timeWindow = rule.timeWindow
+  } else if (rule.type === 'volume') {
+    formData.threshold = rule.threshold
+    formData.timeWindow = rule.timeWindow
   }
+  showAddDialog.value = true
 }
 
-const updateRuleEnabled = async (id: string, enabled: boolean) => {
-  try {
-    await alertStore.updateRule(id, { enabled })
-    rules.value = alertStore.rules
-  } catch (err) {
-    message.error('更新规则失败')
-  }
+function handleDelete(rule: AlertRule) {
+  alertStore.deleteRule(rule.id)
+  message.success('规则删除成功')
 }
 
-const deleteRule = async (id: string) => {
-  try {
-    await alertStore.deleteRule(id)
-    message.success('规则删除成功')
-    rules.value = alertStore.rules
-  } catch (err) {
-    message.error('删除规则失败')
-  }
-}
-
-const getRuleTypeName = (type: string) => {
-  const map: Record<string, string> = {
-    keyword: '关键词',
-    sentiment: '情感',
-    volume: '量激增',
-    propagation: '传播',
-  }
-  return map[type] || type
-}
-
-const getRuleTypeTag = (type: string) => {
-  const map: Record<string, string> = {
-    keyword: 'success',
-    sentiment: 'warning',
-    volume: 'info',
-    propagation: 'error',
-  }
-  return map[type] || 'default'
-}
+const columns = [
+  {
+    title: '规则名称',
+    key: 'description',
+    width: 150,
+  },
+  {
+    title: '类型',
+    key: 'type',
+    width: 120,
+    render: (row: AlertRule) => {
+      const typeMap: Record<string, string> = {
+        keyword: '关键词',
+        sentiment: '情感',
+        volume: '量激增',
+      }
+      return typeMap[row.type] || row.type
+    },
+  },
+  {
+    title: '配置',
+    key: 'config',
+    ellipsis: { tooltip: true },
+    render: (row: AlertRule) => {
+      if (row.type === 'keyword') {
+        return row.keywords.join('、')
+      } else if (row.type === 'sentiment') {
+        return `情感: ${row.sentiment === 'negative' ? '负面' : '中性'}, 阈值: ${row.threshold}, 窗口: ${row.timeWindow}分钟`
+      } else if (row.type === 'volume') {
+        return `阈值: ${row.threshold}条, 窗口: ${row.timeWindow}分钟`
+      }
+      return '-'
+    },
+  },
+  {
+    title: '级别',
+    key: 'severity',
+    width: 100,
+    render: (row: AlertRule) => {
+      const typeMap: Record<string, any> = {
+        high: { type: 'error', text: '严重' },
+        medium: { type: 'warning', text: '警告' },
+        low: { type: 'info', text: '提示' },
+      }
+      const config = typeMap[row.severity] || { type: 'default', text: row.severity }
+      return h(NTag, { type: config.type }, { default: () => config.text })
+    },
+  },
+  {
+    title: '状态',
+    key: 'enabled',
+    width: 100,
+    render: (row: AlertRule) => {
+      return h(
+        NTag,
+        { type: row.enabled ? 'success' : 'default' },
+        { default: () => (row.enabled ? '启用' : '禁用') }
+      )
+    },
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 200,
+    render: (row: AlertRule) => {
+      return h(NSpace, { size: 'small' }, {
+        default: () => [
+          h(
+            NButton,
+            {
+              size: 'small',
+              onClick: () => handleEdit(row),
+            },
+            { default: () => '编辑' }
+          ),
+          h(
+            NPopconfirm,
+            {
+              onPositiveClick: () => handleDelete(row),
+            },
+            {
+              trigger: () =>
+                h(
+                  NButton,
+                  {
+                    size: 'small',
+                    type: 'error',
+                  },
+                  { default: () => '删除' }
+                ),
+              default: () => '确定要删除这条规则吗？',
+            }
+          ),
+        ],
+      })
+    },
+  },
+]
 </script>
 
 <style scoped>
 .alert-rule-editor {
-  @apply w-full;
+  margin-bottom: 2rem;
 }
 
 .rule-card {
-  @apply bg-gray-800 text-gray-200;
-}
-
-.rule-section {
-  @apply space-y-4;
-}
-
-.rules-list {
-  @apply mt-6;
-}
-
-.rule-item {
-  @apply flex items-center justify-between;
-}
-
-.rule-info {
-  @apply flex items-center gap-3 flex-1;
-}
-
-.rule-desc {
-  @apply text-gray-400 text-sm flex-1;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.2) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
 }
 </style>
 

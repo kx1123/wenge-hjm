@@ -7,9 +7,11 @@ import Upload from './views/Upload.vue'
 import Dashboard from './views/Dashboard.vue'
 import Report from './views/Report.vue'
 import DataList from './views/DataList.vue'
-import AIAnalysis from './views/AIAnalysis.vue'
-import AlertSystem from './views/AlertSystem.vue'
 import './style.css'
+
+// 延迟加载AI分析和预警系统页面（避免启动错误）
+const AIAnalysis = () => import('./views/AIAnalysis.vue')
+const AlertSystem = () => import('./views/AlertSystem.vue')
 
 const router = createRouter({
   history: createWebHistory(),
