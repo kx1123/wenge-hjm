@@ -1,6 +1,6 @@
 <template>
   <div class="ai-chat-panel">
-    <n-card class="chat-card h-full flex flex-col">
+    <n-card class="chat-card">
       <!-- 顶部：标题 + 清空按钮 -->
       <div class="chat-header">
         <h3 class="chat-title">舆情分析助手</h3>
@@ -403,9 +403,10 @@ watch(
 }
 
 .chat-header {
-  @apply flex items-center justify-between mb-4 pb-3 border-b border-gray-700;
+  @apply flex items-center justify-between border-b border-gray-700;
   flex-shrink: 0;
   padding: 1rem;
+  background-color: #1f2937;
 }
 
 .chat-title {
@@ -413,10 +414,13 @@ watch(
 }
 
 .chat-messages {
-  @apply flex-1 overflow-y-auto px-2;
+  @apply flex-1 overflow-y-auto;
   min-height: 0;
   scroll-behavior: smooth;
-  padding-bottom: 1rem;
+  padding: 1rem;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* 自定义滚动条 */
