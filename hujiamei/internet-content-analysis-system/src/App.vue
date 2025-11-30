@@ -35,6 +35,13 @@
             >
               数据列表
             </n-button>
+            <n-button
+              quaternary
+              :type="currentRoute === '/ai-analysis' ? 'primary' : 'default'"
+              @click="$router.push('/ai-analysis')"
+            >
+              AI智能分析
+            </n-button>
             </n-space>
           </div>
         </n-layout-header>

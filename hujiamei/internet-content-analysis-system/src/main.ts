@@ -7,6 +7,7 @@ import Upload from './views/Upload.vue'
 import Dashboard from './views/Dashboard.vue'
 import Report from './views/Report.vue'
 import DataList from './views/DataList.vue'
+import AIAnalysis from './views/AIAnalysis.vue'
 import './style.css'
 
 const router = createRouter({
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: '/dashboard', component: Dashboard },
     { path: '/report', component: Report },
     { path: '/data-list', component: DataList },
+    { path: '/ai-analysis', component: AIAnalysis },
   ],
 })
 

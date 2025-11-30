@@ -68,7 +68,11 @@ export class AIAnalyzer {
       const createdAt = new Date(cached.createdAt)
       const hoursDiff = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60)
       if (hoursDiff > 24) {
-        await db.aiCache.delete(cached.id!)
+        // 确保 id 是 number 类型
+        const cacheId = typeof cached.id === 'number' ? cached.id : (typeof cached.id === 'string' ? parseInt(cached.id, 10) : null)
+        if (cacheId !== null && !isNaN(cacheId)) {
+          await db.aiCache.delete(cacheId)
+        }
         return null
       }
 
@@ -277,21 +281,47 @@ export class AIAnalyzer {
       const parsed = this.extractJSON(response)
 
       let result: KeywordResult[]
-      if (Array.isArray(parsed)) {
-        // 如果是带权重的格式 [{keyword: "...", weight: 0.9}]
-        if (parsed.length > 0 && typeof parsed[0] === 'object' && 'keyword' in parsed[0]) {
-          result = parsed
+      if (typeof parsed === 'object' && parsed !== null) {
+        // 如果是 { keywords: [...] } 格式（通义千问标准格式）
+        if ('keywords' in parsed && Array.isArray(parsed.keywords)) {
+          result = parsed.keywords
+            .filter((item: any) => {
+              const word = item.word || item.keyword || String(item)
+              const weight = typeof item.weight === 'number' ? item.weight : 0.5
+              return word.length >= 2 && weight >= 0.5
+            })
             .slice(0, topK)
             .map((item: any) => ({
-              keyword: item.keyword || item.word || String(item),
-              weight: typeof item.weight === 'number' ? item.weight : 1 - (parsed.indexOf(item) / parsed.length),
+              keyword: item.word || item.keyword || String(item),
+              weight: typeof item.weight === 'number' ? item.weight : 0.5,
             }))
+        } else if (Array.isArray(parsed)) {
+          // 如果是数组格式 [{word: "...", weight: 0.9}] 或 ["关键词1", "关键词2"]
+          if (parsed.length > 0 && typeof parsed[0] === 'object' && ('word' in parsed[0] || 'keyword' in parsed[0])) {
+            result = parsed
+              .filter((item: any) => {
+                const word = item.word || item.keyword || String(item)
+                const weight = typeof item.weight === 'number' ? item.weight : 0.5
+                return word.length >= 2 && weight >= 0.5
+              })
+              .slice(0, topK)
+              .map((item: any) => ({
+                keyword: item.word || item.keyword || String(item),
+                weight: typeof item.weight === 'number' ? item.weight : 0.5,
+              }))
+          } else {
+            // 简单数组格式 ["关键词1", "关键词2"]
+            result = parsed
+              .filter((kw: any) => String(kw).length >= 2)
+              .slice(0, topK)
+              .map((kw: string, index: number) => ({
+                keyword: String(kw),
+                weight: 1 - (index / parsed.length),
+              }))
+          }
         } else {
-          // 如果是简单数组格式 ["关键词1", "关键词2"]
-          result = parsed.slice(0, topK).map((kw: string, index: number) => ({
-            keyword: String(kw),
-            weight: 1 - (index / parsed.length),
-          }))
+          // 解析失败，使用降级方案
+          result = this.mockKeywords(text, topK)
         }
       } else {
         // 解析失败，使用降级方案
@@ -331,7 +361,16 @@ export class AIAnalyzer {
     try {
       const prompt = this.getSummaryPrompt(text, maxLength)
       const response = await this.callAPI(prompt)
-      const result = response.trim()
+      // 清理响应：移除可能的说明文字、换行、多余标点
+      let result = response.trim()
+      // 移除可能的"摘要："等前缀
+      result = result.replace(/^(摘要[：:]|Summary[：:]|摘要内容[：:])\s*/i, '')
+      // 移除换行符，替换为空格
+      result = result.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim()
+      // 确保不超过最大长度（按中文字符数）
+      if (result.length > maxLength) {
+        result = result.substring(0, maxLength)
+      }
       await this.saveToCache(cacheKey, result, 'webmedia', 'summary')
       return result
     } catch (error) {
@@ -344,9 +383,10 @@ export class AIAnalyzer {
 
   /**
    * 分类话题（带降级）
+   * 返回格式：{ category: string, topics: string[], event_id?: string }
    */
-  async classifyTopic(text: string): Promise<string> {
-    const cacheKey = this.generateCacheKey('topic', text)
+  async classifyTopic(text: string, dataType: 'webmedia' | 'weibo' = 'webmedia', title?: string): Promise<{ category: string; topics: string[]; event_id?: string }> {
+    const cacheKey = this.generateCacheKey('topic', text, { dataType, title })
     
     // 1. 尝试从缓存获取
     const cached = await this.getFromCache(cacheKey)
@@ -356,22 +396,35 @@ export class AIAnalyzer {
 
     // 2. Mock 模式
     if (this.mock) {
-      const result = this.mockTopic(text)
-      await this.saveToCache(cacheKey, result, 'webmedia', 'topic')
+      const result = this.mockTopic(text, dataType)
+      await this.saveToCache(cacheKey, result, dataType, 'topic')
       return result
     }
 
     // 3. 调用真实 API（带降级）
     try {
-      const prompt = this.getTopicPrompt(text)
+      const prompt = this.getTopicPrompt(text, dataType, title)
       const response = await this.callAPI(prompt)
-      const result = response.trim()
-      await this.saveToCache(cacheKey, result, 'webmedia', 'topic')
+      const parsed = this.extractJSON(response)
+
+      let result: { category: string; topics: string[]; event_id?: string }
+      if (typeof parsed === 'object' && parsed !== null && 'category' in parsed) {
+        result = {
+          category: String(parsed.category || '中性报道'),
+          topics: Array.isArray(parsed.topics) ? parsed.topics.slice(0, 3).map(String) : [],
+          event_id: parsed.event_id ? String(parsed.event_id) : undefined,
+        }
+      } else {
+        // 解析失败，使用降级方案
+        result = this.mockTopic(text, dataType)
+      }
+
+      await this.saveToCache(cacheKey, result, dataType, 'topic')
       return result
     } catch (error) {
       console.warn('话题分类API调用失败，使用降级方案:', error)
-      const result = this.mockTopic(text)
-      await this.saveToCache(cacheKey, result, 'webmedia', 'topic')
+      const result = this.mockTopic(text, dataType)
+      await this.saveToCache(cacheKey, result, dataType, 'topic')
       return result
     }
   }
@@ -475,16 +528,54 @@ export class AIAnalyzer {
 
   /**
    * Mock 话题分类
+   * 返回格式：{ category: string, topics: string[], event_id?: string }
    */
-  private mockTopic(text: string): string {
-    const topics = ['投诉', '建议', '咨询', '表扬', '中性报道', '其他']
+  private mockTopic(text: string, dataType: 'webmedia' | 'weibo' = 'webmedia'): { category: string; topics: string[]; event_id?: string } {
+    const now = new Date()
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
+
     // 简单的关键词匹配
-    if (text.includes('投诉') || text.includes('不满')) return '投诉'
-    if (text.includes('建议') || text.includes('希望')) return '建议'
-    if (text.includes('咨询') || text.includes('请问')) return '咨询'
-    if (text.includes('表扬') || text.includes('感谢')) return '表扬'
-    if (text.includes('报道') || text.includes('新闻')) return '中性报道'
-    return topics[Math.floor(Math.random() * topics.length)]
+    let category = '中性报道'
+    if (text.includes('投诉') || text.includes('不满') || text.includes('问题') || text.includes('差') || text.includes('骗')) {
+      category = '投诉'
+    } else if (text.includes('建议') || text.includes('希望') || text.includes('可以改进')) {
+      category = '建议'
+    } else if (text.includes('咨询') || text.includes('请问') || text.includes('如何') || text.includes('有没有')) {
+      category = '咨询'
+    } else if (text.includes('表扬') || text.includes('感谢') || text.includes('好') || text.includes('优秀')) {
+      category = '表扬'
+    } else if (text.includes('报道') || text.includes('新闻') || dataType === 'webmedia') {
+      category = '中性报道'
+    }
+
+    // 提取话题标签 #xxx#
+    const topicMatches = text.match(/#([^#]+?)#/g)
+    const topics: string[] = topicMatches
+      ? topicMatches.map((tag) => tag.slice(1, -1)).slice(0, 3)
+      : [category, dataType === 'webmedia' ? '网媒报道' : '微博讨论'].slice(0, 3)
+
+    // 生成 event_id
+    let eventKeyword = 'default'
+    if (topicMatches && topicMatches.length > 0) {
+      eventKeyword = topicMatches[0].slice(1, -1).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20)
+    } else if (text.includes('offer')) {
+      eventKeyword = 'offer'
+    } else if (text.includes('风景') || text.includes('scenery')) {
+      eventKeyword = 'scenery'
+    } else {
+      // 提取高频词作为 keyword
+      const words = text.split(/[\s，。、；：！？\n\r]+/).filter(w => w.length >= 2)
+      if (words.length > 0) {
+        eventKeyword = words[0].toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20)
+      }
+    }
+    const event_id = `EVT_${dateStr}_${eventKeyword}`
+
+    return {
+      category,
+      topics: topics.slice(0, 3),
+      event_id,
+    }
   }
 
   // ========== Prompt 生成 ==========
@@ -531,59 +622,136 @@ export class AIAnalyzer {
   }
 
   /**
-   * 生成关键词提取提示词
+   * 生成关键词提取提示词（适配通义千问）
    */
   private getKeywordsPrompt(text: string): string {
-    return `请从以下文本中提取10个关键词，并给出每个关键词的权重（0-1）。
+    return `你是一名舆情热词挖掘专家，请提取以下文本的核心热词。
 
 文本内容：${text}
 
-要求：
-1. 提取最能代表文本核心内容的关键词
-2. 关键词要具体、准确、有意义
-3. 权重表示关键词的重要性，范围0-1，1表示最重要
+【输出格式】严格 JSON：
+{
+  "keywords": [
+    { "word": "词1", "weight": 0.0~1.0 },
+    { "word": "词2", "weight": 0.0~1.0 }
+  ]
+}
 
-请严格按照以下JSON数组格式返回，不要包含任何其他文字说明：
-[
-  {"keyword": "关键词1", "weight": 0.9},
-  {"keyword": "关键词2", "weight": 0.8},
-  ...
-]`
+【热词原则】
+- 聚焦：事件主体、核心动作、情绪词、话题标签
+- 排除：通用词（「近日」「据悉」）、停用词（的/了/在/是/有/和/与/或/但/而/等）
+- 优先提取 #xxx# 标签（去#号）
+
+【要求】
+1. 仅输出 JSON，不要包含任何其他文字说明
+2. weight ≥0.5 为有效热词
+3. 词长 ≥2，去停用词
+4. 关键词数量：3-10个
+5. 按 weight 降序排列
+
+【示例输出】
+{
+  "keywords": [
+    { "word": "offer", "weight": 0.95 },
+    { "word": "测算", "weight": 0.85 },
+    { "word": "AI", "weight": 0.75 }
+  ]
+}`
   }
 
   /**
-   * 生成摘要提示词
+   * 生成摘要提示词（适配通义千问）
    */
   private getSummaryPrompt(text: string, maxLength: number): string {
-    return `请为以下文本生成一段简洁的摘要。
+    return `你是一名舆情摘要生成专家，请为以下文本生成摘要。
 
 文本内容：${text}
 
-要求：
-1. 摘要长度：不超过${maxLength}字
-2. 提取核心信息和关键事实
-3. 保持客观、准确、简洁
+【输出要求】
+- 纯文本摘要，严格 ≤ ${maxLength} 字（中文按字符数）
+- 无标题、无换行
+- 直接输出摘要内容，不要包含任何说明文字
 
-请直接返回摘要内容，不要包含其他说明。`
+【摘要原则】
+- 提取：5W1H（Who/What/When/Where/Why/How）或核心观点 + 情绪倾向
+- 客观陈述，不添加观点
+- 保留关键信息、情绪词/标签
+
+【强制要求】
+1. 严格 ≤ ${maxLength} 字
+2. 不出现"本文""该微博"等指代
+3. 情感倾向需隐含（负面→"问题""质疑"；正面→"满意""赞赏"）
+4. 不使用引号、括号等标点符号（除非必要）
+5. 直接输出摘要内容`
   }
 
   /**
-   * 生成话题分类提示词
+   * 生成话题分类提示词（适配通义千问）
+   * 输出格式：{ category, topics, event_id }
    */
-  private getTopicPrompt(text: string): string {
-    return `请对以下文本进行话题分类。
+  private getTopicPrompt(text: string, dataType: 'webmedia' | 'weibo' = 'webmedia', title?: string): string {
+    const now = new Date()
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
 
-文本内容：${text}
+    if (dataType === 'webmedia') {
+      return `你是一名舆情分类专家，请分析以下网媒文章的类型与话题。
 
-请从以下类别中选择最合适的一个：
-- 投诉：用户或机构对服务、产品、政策等的投诉
-- 建议：对改进、优化提出的建议
-- 咨询：询问信息、政策、服务等
-- 表扬：对服务、产品、政策等的正面评价
-- 中性报道：客观的新闻报道，无明显倾向
-- 其他：不属于以上类别的其他类型
+文章标题：${title || '无'}
+文章内容：${text}
 
-请只返回类别名称，例如：投诉、建议、咨询、表扬、中性报道、其他。`
+【输出格式】严格 JSON：
+{
+  "category": "投诉"|"建议"|"咨询"|"表扬"|"中性报道",
+  "topics": ["话题1", "话题2"],
+  "event_id": "EVT_${dateStr}_keyword"
+}
+
+【分类规则】
+- 投诉：含"问题""投诉""差""骗" → 负面诉求
+- 建议：含"建议""希望""可以改进" → 建设性意见
+- 咨询：含"请问""如何""有没有" → 信息询问
+- 表扬：含"好""优秀""感谢" → 正面评价
+- 中性报道：新闻体，无明显情感倾向
+
+【事件 ID 生成规则】
+- 取标题/核心事件关键词 → hash → \`EVT_${dateStr}_keyword\`
+- 示例：标题含"offer" → \`EVT_${dateStr}_offer\`
+- keyword 为小写，去特殊字符，最多20字符
+
+【要求】
+1. topics ≤3 个，为具体名词短语
+2. confidence <0.7 时 category="中性报道"
+3. 仅输出 JSON，不要包含任何其他文字说明`
+    } else {
+      return `你是一名舆情分类专家，请分析以下微博内容的类型与话题。
+
+内容：${text}
+
+【输出格式】严格 JSON：
+{
+  "category": "投诉"|"建议"|"咨询"|"表扬"|"中性报道",
+  "topics": ["话题1", "话题2"],
+  "event_id": "EVT_${dateStr}_keyword"
+}
+
+【分类规则】
+- 投诉：含"问题""投诉""差""骗" → 负面诉求
+- 建议：含"建议""希望""可以改进" → 建设性意见
+- 咨询：含"请问""如何""有没有" → 信息询问
+- 表扬：含"好""优秀""感谢" → 正面评价
+- 中性报道：客观的讨论，无明显倾向
+
+【事件 ID 生成规则】
+- 提取 #xxx# 标签或高频词 → \`EVT_${dateStr}_keyword\`
+- 示例：\`#令人心动的offer#\` → \`EVT_${dateStr}_offer\`
+- 示例：\`风景很好\`（无标签）→ \`EVT_${dateStr}_scenery\`
+- keyword 为小写，去特殊字符，最多20字符
+
+【要求】
+1. topics ≤3 个，为具体名词短语
+2. confidence <0.7 时 category="中性报道"
+3. 仅输出 JSON，不要包含任何其他文字说明`
+    }
   }
 }
 
