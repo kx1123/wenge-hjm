@@ -1,0 +1,257 @@
+<template>
+  <n-config-provider :theme="theme">
+    <n-message-provider>
+      <n-dialog-provider>
+        <n-layout class="app-layout">
+        <n-layout-header class="app-header" bordered>
+          <div class="header-content">
+            <h1 class="text-2xl font-bold">互联网内容分析系统</h1>
+            <n-space>
+              <n-button
+                quaternary
+                :type="currentRoute === '/upload' ? 'primary' : 'default'"
+                @click="$router.push('/upload')"
+              >
+                数据上传
+              </n-button>
+              <n-button
+                quaternary
+                :type="currentRoute === '/dashboard' ? 'primary' : 'default'"
+                @click="$router.push('/dashboard')"
+              >
+                数据大屏
+              </n-button>
+            <n-button
+              quaternary
+              :type="currentRoute === '/report' ? 'primary' : 'default'"
+              @click="$router.push('/report')"
+            >
+              分析报告
+            </n-button>
+            <n-button
+              quaternary
+              :type="currentRoute === '/data-list' ? 'primary' : 'default'"
+              @click="$router.push('/data-list')"
+            >
+              数据列表
+            </n-button>
+            <n-button
+              quaternary
+              :type="currentRoute === '/ai-analysis' ? 'primary' : 'default'"
+              @click="$router.push('/ai-analysis')"
+            >
+              AI智能分析
+            </n-button>
+            <n-button
+              quaternary
+              :type="currentRoute === '/alert-system' ? 'primary' : 'default'"
+              @click="$router.push('/alert-system')"
+            >
+              智能预警
+            </n-button>
+            </n-space>
+          </div>
+        </n-layout-header>
+
+        <n-layout-content class="app-content">
+          <router-view />
+        </n-layout-content>
+
+        <!-- AI聊天助手（固定在右下角） -->
+        <Transition name="slide-up">
+          <div v-if="showChatPanel" class="ai-chat-container">
+            <AIChatPanel :on-send="handleChatSend" />
+            <n-button
+              class="close-chat-btn"
+              circle
+              size="small"
+              type="error"
+              @click="showChatPanel = false"
+            >
+              <template #icon>
+                <span>✕</span>
+              </template>
+            </n-button>
+          </div>
+        </Transition>
+        
+        <!-- 打开聊天助手按钮（当面板关闭时显示） -->
+        <Transition name="fade">
+          <n-button
+            v-if="!showChatPanel"
+            class="open-chat-btn"
+            circle
+            type="primary"
+            size="large"
+            @click="showChatPanel = true"
+          >
+            <template #icon>
+              <span>💬</span>
+            </template>
+          </n-button>
+        </Transition>
+      </n-layout>
+      </n-dialog-provider>
+    </n-message-provider>
+  </n-config-provider>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
+import {
+  NConfigProvider,
+  NMessageProvider,
+  NDialogProvider,
+  NLayout,
+  NLayoutHeader,
+  NLayoutContent,
+  NButton,
+  NSpace,
+  darkTheme,
+} from 'naive-ui'
+import AIChatPanel from '@/components/AIChatPanel.vue'
+import { createChatEngine } from '@/ai/chatEngine'
+import type { ChatMessage } from '@/interfaces/ai'
+
+const route = useRoute()
+
+const currentRoute = computed(() => route.path)
+const theme = darkTheme
+
+// 聊天助手状态
+const showChatPanel = ref(false) // 默认隐藏
+const chatEngine = createChatEngine()
+
+// 处理聊天消息
+async function handleChatSend(message: string, history: ChatMessage[] = []): Promise<{ content: string }> {
+  try {
+    // 使用 chatEngine 发送消息并返回回复，传递历史消息以支持多轮对话
+    const reply = await chatEngine.sendMessage(message, history)
+    return reply
+  } catch (error) {
+    console.error('聊天发送失败:', error)
+    throw error
+  }
+}
+</script>
+
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+}
+
+#app {
+  width: 100%;
+  height: 100vh;
+}
+
+.app-layout {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  padding: 1rem 2rem;
+  background-color: #1a1a1a;
+  color: white;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  background-color: #0a0a0a;
+}
+
+.ai-chat-container {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  width: 400px;
+  min-height: 500px;
+  max-height: calc(100vh - 40px);
+  height: auto;
+  z-index: 1000;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.close-chat-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1001;
+  background-color: rgba(239, 68, 68, 0.9) !important;
+  border: none !important;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-chat-btn:hover {
+  background-color: rgba(239, 68, 68, 1) !important;
+}
+
+.open-chat-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999;
+  width: 56px;
+  height: 56px;
+  min-width: 56px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  border-radius: 50%;
+}
+
+/* 动画 */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.slide-up-enter-from {
+  transform: translateY(100%);
+  opacity: 0;
+}
+
+.slide-up-leave-to {
+  transform: translateY(100%);
+  opacity: 0;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>
+
