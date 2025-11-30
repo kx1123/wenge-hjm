@@ -91,7 +91,7 @@ const handleGenerateReport = async () => {
         timeRange,
       })
 
-      const analyzer = createAIAnalyzer({ mock: true })
+      const analyzer = createAIAnalyzer({ mock: false })
       reportContent.value = await analyzer.chat([{ role: 'user', content: prompt }])
     } else {
       const typeStats = reportType.value === 'webmedia' ? stats.webmedia : stats.weibos
@@ -106,7 +106,7 @@ const handleGenerateReport = async () => {
         timeRange,
       })
 
-      const analyzer = createAIAnalyzer({ mock: true })
+      const analyzer = createAIAnalyzer({ mock: false })
       reportContent.value = await analyzer.chat([{ role: 'user', content: prompt }])
     }
   } catch (error) {

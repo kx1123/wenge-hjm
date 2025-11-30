@@ -2,19 +2,36 @@ import Dexie, { type Table } from 'dexie'
 import type { WebMediaData, WeiboData, DataSource } from '@/interfaces/data'
 
 /**
+ * AI缓存接口
+ */
+export interface AICache {
+  id?: number
+  cacheKey: string // `${hash(content)}_${dataType}_${promptVersion}`
+  dataType: 'webmedia' | 'weibo'
+  promptType: 'sentiment' | 'keywords' | 'summary' | 'category' | 'topic' | 'full'
+  promptVersion: string
+  result: string // JSON stringified result
+  createdAt: string
+  expiresAt: string
+}
+
+/**
  * IndexedDB数据库类
  */
 class ContentAnalysisDB extends Dexie {
   webmedia!: Table<WebMediaData, number>
   weibos!: Table<WeiboData, number>
+  aiCache!: Table<AICache, number>
 
   constructor() {
     super('ContentAnalysisDB')
-    this.version(1).stores({
+    this.version(2).stores({
       // 表 webmedia：字段 + 索引 ['publishTime', 'sentiment', 'source']
       webmedia: '++id, publishTime, sentiment, source',
       // 表 weibos：字段 + 索引 ['publishTime', 'sentiment', 'userName']
       weibos: '++id, publishTime, sentiment, userName',
+      // AI缓存表：key = `${hash(content)}_${dataType}_${promptVersion}`
+      aiCache: '++id, cacheKey, dataType, promptType, expiresAt',
     })
   }
 }

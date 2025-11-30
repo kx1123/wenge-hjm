@@ -1,413 +1,595 @@
 import axios from 'axios'
-import type {
-  AIAnalysisResult,
-  AnalyzeOptions,
-  AIClientConfig,
-  ChatMessage,
-  SentimentAnalysisResult,
-  HotWordAnalysis,
-  TopicCluster,
-  EventCorrelation,
-} from '@/interfaces/ai'
-import { getSentimentPrompt } from './prompts/sentiment'
-import { getKeywordsPrompt } from './prompts/keywords'
-import { getSummaryPrompt, getMergedSummaryPrompt } from './prompts/summary'
-import { getCategoryPrompt } from './prompts/category'
-import { getTopicPrompt } from './prompts/topic'
-import { CHAT_SYSTEM_PROMPT } from './prompts/chat'
+import { db } from '@/db/indexedDB'
+
+/**
+ * AI分析器配置
+ */
+export interface AIAnalyzerConfig {
+  mock?: boolean
+  apiKey?: string
+}
+
+/**
+ * 情感分析结果
+ */
+export interface SentimentResult {
+  sentiment: 'positive' | 'neutral' | 'negative'
+  score: number // 0-100
+  confidence?: number // 0-1
+}
+
+/**
+ * 关键词结果
+ */
+export interface KeywordResult {
+  keyword: string
+  weight: number // 0-1
+}
 
 /**
  * AI分析器类
  */
 export class AIAnalyzer {
   private mock: boolean
-  private apiUrl?: string
-  private apiKey?: string
-  private model: string
+  private apiKey: string
+  private apiUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'
+  private model = 'qwen-turbo'
 
-  constructor(config: AIClientConfig = {}) {
-    this.mock = config.mock ?? import.meta.env.VITE_AI_MOCK === 'true'
-    this.apiUrl = config.apiUrl || import.meta.env.VITE_AI_API_URL
-    this.apiKey = config.apiKey || import.meta.env.VITE_AI_API_KEY
-    this.model = config.model || 'glm-4-flash'
+  constructor(config: AIAnalyzerConfig = {}) {
+    this.mock = config.mock ?? false
+    this.apiKey = config.apiKey || 'sk-b48c6eb1c32242af82e89ee7582c66e9'
   }
 
   /**
-   * 模拟AI分析（用于开发测试）
+   * 生成缓存键
    */
-  private async mockAnalyze(options: AnalyzeOptions): Promise<AIAnalysisResult> {
-    // 模拟延迟
-    await new Promise((resolve) => setTimeout(resolve, 500 + Math.random() * 1000))
-
-    const sentiments: Array<'positive' | 'neutral' | 'negative'> = ['positive', 'neutral', 'negative']
-    const sentiment = sentiments[Math.floor(Math.random() * 3)]
-    const sentimentScore = sentiment === 'positive' ? 60 + Math.random() * 40 : sentiment === 'negative' ? Math.random() * 40 : 40 + Math.random() * 20
-
-    // 简单的关键词提取（基于内容长度）
-    const keywords = [
-      '舆情',
-      '分析',
-      options.type === 'webmedia' ? '网媒' : '微博',
-      sentiment === 'positive' ? '正面' : sentiment === 'negative' ? '负面' : '中性',
-    ]
-
-    const categories = ['投诉', '建议', '咨询', '表扬', '中性报道', '其他']
-    const category = categories[Math.floor(Math.random() * categories.length)]
-
-    return {
-      sentiment,
-      sentimentScore: Math.round(sentimentScore),
-      keywords,
-      summary: `这是一条${sentiment === 'positive' ? '正面' : sentiment === 'negative' ? '负面' : '中性'}的${options.type === 'webmedia' ? '网媒' : '微博'}内容。`,
-      category,
-      topics: [keywords[0], keywords[1]],
+  private generateCacheKey(method: string, text: string, params?: any): string {
+    const paramsStr = params ? JSON.stringify(params) : ''
+    const content = `${method}_${text}_${paramsStr}`
+    let hash = 0
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash
     }
+    return `ai_${Math.abs(hash).toString(36)}`
   }
 
   /**
-   * 调用真实AI API
+   * 从缓存获取
    */
-  private async callAI(prompt: string): Promise<string> {
-    if (!this.apiUrl || !this.apiKey) {
-      throw new Error('AI API配置不完整')
-    }
-
+  private async getFromCache(cacheKey: string): Promise<any | null> {
     try {
-      const response = await axios.post(
-        this.apiUrl,
-        {
-          model: this.model,
-          messages: [
-            {
-              role: 'user',
-              content: prompt,
+      const cached = await db.aiCache.where('cacheKey').equals(cacheKey).first()
+      if (!cached) return null
+
+      // 检查是否过期（24小时）
+      const now = new Date()
+      const createdAt = new Date(cached.createdAt)
+      const hoursDiff = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60)
+      if (hoursDiff > 24) {
+        await db.aiCache.delete(cached.id!)
+        return null
+      }
+
+      return JSON.parse(cached.result)
+    } catch (error) {
+      console.error('读取缓存失败:', error)
+      return null
+    }
+  }
+
+  /**
+   * 保存到缓存
+   */
+  private async saveToCache(cacheKey: string, result: any, dataType: 'webmedia' | 'weibo' = 'webmedia', promptType: 'sentiment' | 'keywords' | 'summary' | 'category' | 'topic' | 'full' = 'full'): Promise<void> {
+    try {
+      await db.aiCache.put({
+        cacheKey,
+        dataType,
+        promptType,
+        promptVersion: 'v1',
+        result: JSON.stringify(result),
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24小时后过期
+      })
+    } catch (error) {
+      console.error('保存缓存失败:', error)
+    }
+  }
+
+  /**
+   * 调用通义千问 API（带重试和降级）
+   */
+  private async callAPI(prompt: string, maxRetries: number = 2): Promise<string> {
+    // 如果启用 mock，直接返回模拟结果
+    if (this.mock) {
+      throw new Error('Mock mode enabled, use mock methods instead')
+    }
+
+    let lastError: Error | null = null
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await axios.post(
+          this.apiUrl,
+          {
+            model: this.model,
+            input: {
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'text',
+                      text: prompt,
+                    },
+                  ],
+                },
+              ],
             },
-          ],
-          temperature: 0.7,
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.apiKey}`,
+            parameters: {
+              result_format: 'message',
+              temperature: 0.7,
+              max_tokens: 2000,
+            },
           },
-        }
-      )
-
-      return response.data.choices[0]?.message?.content || ''
-    } catch (error) {
-      console.error('AI API调用失败:', error)
-      throw error
-    }
-  }
-
-  /**
-   * 分析情感（带评分）
-   */
-  async analyzeSentiment(options: AnalyzeOptions): Promise<SentimentAnalysisResult> {
-    if (this.mock) {
-      const result = await this.mockAnalyze(options)
-      return {
-        sentiment: result.sentiment,
-        score: result.sentimentScore || 50,
-        confidence: 0.8,
-      }
-    }
-
-    try {
-      const prompt = getSentimentPrompt(
-        options.type,
-        options.content,
-        options.title,
-        options.userName
-      )
-      const response = await this.callAI(prompt)
-
-      // 尝试解析JSON
-      try {
-        const parsed = JSON.parse(response)
-        if (parsed.sentiment && typeof parsed.score === 'number') {
-          return {
-            sentiment: parsed.sentiment as 'positive' | 'neutral' | 'negative',
-            score: Math.max(0, Math.min(100, parsed.score)),
-            confidence: parsed.confidence,
+          {
+            headers: {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+            },
           }
-        }
-      } catch {
-        // 如果不是JSON，尝试文本解析
-        const sentiment = response.trim().toLowerCase()
-        let score = 50
+        )
 
-        if (sentiment.includes('positive') || sentiment.includes('正面')) {
-          score = 60 + Math.random() * 40
-        } else if (sentiment.includes('negative') || sentiment.includes('负面')) {
-          score = Math.random() * 40
+        // 解析响应：output.choices[0].message.content
+        const content = response.data?.output?.choices?.[0]?.message?.content
+        if (content) {
+          return content
+        }
+
+        // 兼容其他格式
+        return response.data.choices?.[0]?.message?.content || response.data.output?.text || ''
+      } catch (error: any) {
+        lastError = error instanceof Error ? error : new Error(String(error))
+        const status = error.response?.status
+
+        // HTTP 429 (限流) 或 500 (服务器错误) 时重试
+        if ((status === 429 || status === 500) && attempt < maxRetries) {
+          // 指数退避：1s, 2s, 4s
+          const delay = Math.pow(2, attempt) * 1000
+          console.warn(`API调用失败，${delay}ms后重试 (${attempt + 1}/${maxRetries})...`, error.response?.data)
+          await new Promise((resolve) => setTimeout(resolve, delay))
+          continue
+        }
+
+        // 其他错误或重试次数用完，抛出错误
+        throw lastError
+      }
+    }
+
+    throw lastError || new Error('API调用失败')
+  }
+
+  /**
+   * 从响应中提取 JSON（处理 markdown 代码块等）
+   */
+  private extractJSON(response: string): any {
+    // 清理响应文本
+    let cleaned = response.trim()
+
+    // 移除 markdown 代码块标记
+    if (cleaned.startsWith('```json')) {
+      cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '')
+    } else if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '')
+    }
+
+    // 尝试提取 JSON 对象或数组
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0])
+      } catch {
+        // 如果解析失败，继续尝试整个文本
+      }
+    }
+
+    // 尝试解析整个文本
+    try {
+      return JSON.parse(cleaned)
+    } catch {
+      // 如果还是失败，返回原始文本
+      return cleaned
+    }
+  }
+
+  /**
+   * 分析情感（带降级）
+   */
+  async analyzeSentiment(text: string, dataType: 'webmedia' | 'weibo'): Promise<SentimentResult> {
+    const cacheKey = this.generateCacheKey('sentiment', text, { dataType })
+    
+    // 1. 尝试从缓存获取
+    const cached = await this.getFromCache(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    // 2. Mock 模式
+    if (this.mock) {
+      const result = this.mockSentiment(text, dataType)
+      await this.saveToCache(cacheKey, result, dataType, 'sentiment')
+      return result
+    }
+
+    // 3. 调用真实 API（带降级）
+    try {
+      const prompt = this.getSentimentPrompt(text, dataType)
+      const response = await this.callAPI(prompt)
+      const parsed = this.extractJSON(response)
+
+      let result: SentimentResult
+      if (typeof parsed === 'object' && parsed.sentiment) {
+        result = {
+          sentiment: parsed.sentiment as 'positive' | 'neutral' | 'negative',
+          score: Math.max(0, Math.min(100, parsed.score || 50)),
+          confidence: parsed.confidence || 0.8,
+        }
+      } else {
+        // 解析失败，使用降级方案
+        result = this.mockSentiment(text, dataType)
+      }
+
+      await this.saveToCache(cacheKey, result, dataType, 'sentiment')
+      return result
+    } catch (error) {
+      console.warn('情感分析API调用失败，使用降级方案:', error)
+      const result = this.mockSentiment(text, dataType)
+      await this.saveToCache(cacheKey, result, dataType, 'sentiment')
+      return result
+    }
+  }
+
+  /**
+   * 提取关键词（带降级）
+   */
+  async extractKeywords(text: string, topK: number = 10): Promise<KeywordResult[]> {
+    const cacheKey = this.generateCacheKey('keywords', text, { topK })
+    
+    // 1. 尝试从缓存获取
+    const cached = await this.getFromCache(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    // 2. Mock 模式
+    if (this.mock) {
+      const result = this.mockKeywords(text, topK)
+      await this.saveToCache(cacheKey, result, 'webmedia', 'keywords')
+      return result
+    }
+
+    // 3. 调用真实 API（带降级）
+    try {
+      const prompt = this.getKeywordsPrompt(text)
+      const response = await this.callAPI(prompt)
+      const parsed = this.extractJSON(response)
+
+      let result: KeywordResult[]
+      if (Array.isArray(parsed)) {
+        // 如果是带权重的格式 [{keyword: "...", weight: 0.9}]
+        if (parsed.length > 0 && typeof parsed[0] === 'object' && 'keyword' in parsed[0]) {
+          result = parsed
+            .slice(0, topK)
+            .map((item: any) => ({
+              keyword: item.keyword || item.word || String(item),
+              weight: typeof item.weight === 'number' ? item.weight : 1 - (parsed.indexOf(item) / parsed.length),
+            }))
         } else {
-          score = 40 + Math.random() * 20
+          // 如果是简单数组格式 ["关键词1", "关键词2"]
+          result = parsed.slice(0, topK).map((kw: string, index: number) => ({
+            keyword: String(kw),
+            weight: 1 - (index / parsed.length),
+          }))
         }
+      } else {
+        // 解析失败，使用降级方案
+        result = this.mockKeywords(text, topK)
+      }
 
+      await this.saveToCache(cacheKey, result, 'webmedia', 'keywords')
+      return result
+    } catch (error) {
+      console.warn('关键词提取API调用失败，使用降级方案:', error)
+      const result = this.mockKeywords(text, topK)
+      await this.saveToCache(cacheKey, result, 'webmedia', 'keywords')
+      return result
+    }
+  }
+
+  /**
+   * 生成摘要（带降级）
+   */
+  async generateSummary(text: string, maxLength: number = 200): Promise<string> {
+    const cacheKey = this.generateCacheKey('summary', text, { maxLength })
+    
+    // 1. 尝试从缓存获取
+    const cached = await this.getFromCache(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    // 2. Mock 模式
+    if (this.mock) {
+      const result = this.mockSummary(text, maxLength)
+      await this.saveToCache(cacheKey, result, 'webmedia', 'summary')
+      return result
+    }
+
+    // 3. 调用真实 API（带降级）
+    try {
+      const prompt = this.getSummaryPrompt(text, maxLength)
+      const response = await this.callAPI(prompt)
+      const result = response.trim()
+      await this.saveToCache(cacheKey, result, 'webmedia', 'summary')
+      return result
+    } catch (error) {
+      console.warn('摘要生成API调用失败，使用降级方案:', error)
+      const result = this.mockSummary(text, maxLength)
+      await this.saveToCache(cacheKey, result, 'webmedia', 'summary')
+      return result
+    }
+  }
+
+  /**
+   * 分类话题（带降级）
+   */
+  async classifyTopic(text: string): Promise<string> {
+    const cacheKey = this.generateCacheKey('topic', text)
+    
+    // 1. 尝试从缓存获取
+    const cached = await this.getFromCache(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    // 2. Mock 模式
+    if (this.mock) {
+      const result = this.mockTopic(text)
+      await this.saveToCache(cacheKey, result, 'webmedia', 'topic')
+      return result
+    }
+
+    // 3. 调用真实 API（带降级）
+    try {
+      const prompt = this.getTopicPrompt(text)
+      const response = await this.callAPI(prompt)
+      const result = response.trim()
+      await this.saveToCache(cacheKey, result, 'webmedia', 'topic')
+      return result
+    } catch (error) {
+      console.warn('话题分类API调用失败，使用降级方案:', error)
+      const result = this.mockTopic(text)
+      await this.saveToCache(cacheKey, result, 'webmedia', 'topic')
+      return result
+    }
+  }
+
+  // ========== Mock 方法 ==========
+
+  /**
+   * Mock 情感分析（网媒中性多，微博两极）
+   */
+  private mockSentiment(_text: string, dataType: 'webmedia' | 'weibo'): SentimentResult {
+    if (dataType === 'webmedia') {
+      // 网媒：70%中性，20%正面，10%负面
+      const rand = Math.random()
+      if (rand < 0.7) {
         return {
-          sentiment: sentiment.includes('positive') || sentiment.includes('正面')
-            ? 'positive'
-            : sentiment.includes('negative') || sentiment.includes('负面')
-            ? 'negative'
-            : 'neutral',
-          score: Math.round(score),
+          sentiment: 'neutral',
+          score: 45 + Math.random() * 15, // 45-60，如「国产三大AI测算」→ 55
+          confidence: 0.75 + Math.random() * 0.15,
+        }
+      } else if (rand < 0.9) {
+        return {
+          sentiment: 'positive',
+          score: 60 + Math.random() * 30, // 60-90
+          confidence: 0.7 + Math.random() * 0.2,
+        }
+      } else {
+        return {
+          sentiment: 'negative',
+          score: Math.random() * 40, // 0-40
+          confidence: 0.7 + Math.random() * 0.2,
         }
       }
-    } catch (error) {
-      console.error('情感分析失败，使用默认值:', error)
-      return {
-        sentiment: 'neutral',
-        score: 50,
-      }
-    }
-
-    return {
-      sentiment: 'neutral',
-      score: 50,
-    }
-  }
-
-  /**
-   * 提取关键词
-   */
-  async extractKeywords(options: AnalyzeOptions): Promise<string[]> {
-    if (this.mock) {
-      const result = await this.mockAnalyze(options)
-      return result.keywords
-    }
-
-    try {
-      const prompt = getKeywordsPrompt(options.type, options.content, options.title)
-      const response = await this.callAI(prompt)
-
-      // 尝试解析JSON数组
-      try {
-        const parsed = JSON.parse(response)
-        if (Array.isArray(parsed)) {
-          return parsed.filter((k) => typeof k === 'string')
+    } else {
+      // 微博：40%正面，35%负面，25%中性
+      const rand = Math.random()
+      if (rand < 0.4) {
+        return {
+          sentiment: 'positive',
+          score: 60 + Math.random() * 40, // 60-100，如「风景很好」→ 82
+          confidence: 0.75 + Math.random() * 0.15,
         }
-      } catch {
-        // 如果不是JSON，尝试提取引号内的内容
-        const matches = response.match(/"([^"]+)"/g)
-        if (matches) {
-          return matches.map((m) => m.replace(/"/g, ''))
+      } else if (rand < 0.75) {
+        return {
+          sentiment: 'negative',
+          score: Math.random() * 40, // 0-40，如「我好崩溃」→ 25
+          confidence: 0.75 + Math.random() * 0.15,
+        }
+      } else {
+        return {
+          sentiment: 'neutral',
+          score: 40 + Math.random() * 20, // 40-60
+          confidence: 0.7 + Math.random() * 0.2,
         }
       }
-
-      // 最后尝试按逗号分割
-      return response
-        .split(/[,，、]/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0)
-        .slice(0, 5)
-    } catch (error) {
-      console.error('关键词提取失败，使用默认值:', error)
-      return ['舆情', '分析']
     }
   }
 
   /**
-   * 生成摘要（支持自定义长度）
+   * Mock 关键词提取
    */
-  async generateSummary(options: AnalyzeOptions): Promise<string> {
-    if (this.mock) {
-      const result = await this.mockAnalyze(options)
-      return result.summary
+  private mockKeywords(text: string, topK: number): KeywordResult[] {
+    // 简单的关键词提取（基于文本内容）
+    const keywords: KeywordResult[] = []
+    const commonWords = ['舆情', '分析', '数据', '报道', '讨论', '话题', '观点', '情绪', '事件', '新闻']
+    
+    // 从文本中提取可能的关键词
+    const words = text.split(/[\s，。、；：！？\n\r]+/).filter(w => w.length > 1)
+    const uniqueWords = [...new Set(words)].slice(0, topK)
+    
+    uniqueWords.forEach((word, index) => {
+      keywords.push({
+        keyword: word,
+        weight: 1 - (index / topK),
+      })
+    })
+
+    // 如果关键词不足，补充通用词
+    while (keywords.length < topK && keywords.length < commonWords.length) {
+      const word = commonWords[keywords.length]
+      if (!keywords.some(k => k.keyword === word)) {
+        keywords.push({
+          keyword: word,
+          weight: 0.5 - (keywords.length * 0.05),
+        })
+      }
     }
 
-    try {
-      const prompt = getSummaryPrompt(
-        options.type,
-        options.content,
-        options.title,
-        options.summaryLength
-      )
-      const response = await this.callAI(prompt)
-      return response.trim()
-    } catch (error) {
-      console.error('摘要生成失败，使用默认值:', error)
-      return '摘要生成失败'
+    return keywords.slice(0, topK)
+  }
+
+  /**
+   * Mock 摘要生成
+   */
+  private mockSummary(text: string, maxLength: number): string {
+    // 简单的摘要：取前 maxLength 个字符
+    if (text.length <= maxLength) {
+      return text
+    }
+    return text.substring(0, maxLength) + '...'
+  }
+
+  /**
+   * Mock 话题分类
+   */
+  private mockTopic(text: string): string {
+    const topics = ['投诉', '建议', '咨询', '表扬', '中性报道', '其他']
+    // 简单的关键词匹配
+    if (text.includes('投诉') || text.includes('不满')) return '投诉'
+    if (text.includes('建议') || text.includes('希望')) return '建议'
+    if (text.includes('咨询') || text.includes('请问')) return '咨询'
+    if (text.includes('表扬') || text.includes('感谢')) return '表扬'
+    if (text.includes('报道') || text.includes('新闻')) return '中性报道'
+    return topics[Math.floor(Math.random() * topics.length)]
+  }
+
+  // ========== Prompt 生成 ==========
+
+  /**
+   * 生成情感分析提示词
+   */
+  private getSentimentPrompt(text: string, dataType: 'webmedia' | 'weibo'): string {
+    if (dataType === 'webmedia') {
+      return `请分析以下网媒文章的情感倾向和强度。
+
+文章内容：${text}
+
+请分析：
+1. 情感倾向：正面（positive）、中性（neutral）或负面（negative）
+2. 情感强度：0-100的评分，0表示极度负面，50表示中性，100表示极度正面
+
+请严格按照以下JSON格式返回，不要包含任何其他文字说明：
+{
+  "sentiment": "positive|neutral|negative",
+  "score": 0-100,
+  "confidence": 0-1
+}
+
+注意：网媒报道需要分析其客观性和倾向性，考虑报道的立场和态度。`
+    } else {
+      return `请分析以下微博内容的情感倾向和强度。
+
+内容：${text}
+
+请分析：
+1. 情感倾向：正面（positive）、中性（neutral）或负面（negative）
+2. 情感强度：0-100的评分，0表示极度负面，50表示中性，100表示极度正面
+
+请严格按照以下JSON格式返回，不要包含任何其他文字说明：
+{
+  "sentiment": "positive|neutral|negative",
+  "score": 0-100,
+  "confidence": 0-1
+}
+
+注意：微博内容需要分析用户观点的情绪化程度，考虑表达的语气和态度。`
     }
   }
 
   /**
-   * 生成合并摘要（多条舆情智能合并）
+   * 生成关键词提取提示词
    */
-  async generateMergedSummary(
-    items: Array<{ type: 'webmedia' | 'weibo'; content: string; title?: string }>,
-    length?: number
-  ): Promise<string> {
-    if (this.mock) {
-      await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 1200))
-      return `合并摘要：综合了${items.length}条${items[0]?.type === 'webmedia' ? '网媒' : '微博'}内容，主要涉及舆情分析和数据统计。`
-    }
+  private getKeywordsPrompt(text: string): string {
+    return `请从以下文本中提取10个关键词，并给出每个关键词的权重（0-1）。
 
-    try {
-      const prompt = getMergedSummaryPrompt(items, length)
-      const response = await this.callAI(prompt)
-      return response.trim()
-    } catch (error) {
-      console.error('合并摘要生成失败:', error)
-      return '合并摘要生成失败'
-    }
+文本内容：${text}
+
+要求：
+1. 提取最能代表文本核心内容的关键词
+2. 关键词要具体、准确、有意义
+3. 权重表示关键词的重要性，范围0-1，1表示最重要
+
+请严格按照以下JSON数组格式返回，不要包含任何其他文字说明：
+[
+  {"keyword": "关键词1", "weight": 0.9},
+  {"keyword": "关键词2", "weight": 0.8},
+  ...
+]`
   }
 
   /**
-   * 舆情分类
+   * 生成摘要提示词
    */
-  async classifyCategory(options: AnalyzeOptions): Promise<string> {
-    if (this.mock) {
-      const result = await this.mockAnalyze(options)
-      return result.category || '其他'
-    }
+  private getSummaryPrompt(text: string, maxLength: number): string {
+    return `请为以下文本生成一段简洁的摘要。
 
-    try {
-      const prompt = getCategoryPrompt(options.type, options.content, options.title)
-      const response = await this.callAI(prompt)
-      const category = response.trim()
+文本内容：${text}
 
-      const validCategories = ['投诉', '建议', '咨询', '表扬', '中性报道', '中性讨论', '其他']
-      if (validCategories.includes(category)) {
-        return category
-      }
+要求：
+1. 摘要长度：不超过${maxLength}字
+2. 提取核心信息和关键事实
+3. 保持客观、准确、简洁
 
-      // 尝试匹配
-      if (category.includes('投诉')) return '投诉'
-      if (category.includes('建议')) return '建议'
-      if (category.includes('咨询')) return '咨询'
-      if (category.includes('表扬')) return '表扬'
-      if (category.includes('中性')) return options.type === 'webmedia' ? '中性报道' : '中性讨论'
-      return '其他'
-    } catch (error) {
-      console.error('舆情分类失败，使用默认值:', error)
-      return '其他'
-    }
+请直接返回摘要内容，不要包含其他说明。`
   }
 
   /**
-   * 话题识别
+   * 生成话题分类提示词
    */
-  async identifyTopics(options: AnalyzeOptions): Promise<string[]> {
-    if (this.mock) {
-      const result = await this.mockAnalyze(options)
-      return result.topics || []
-    }
+  private getTopicPrompt(text: string): string {
+    return `请对以下文本进行话题分类。
 
-    try {
-      const prompt = getTopicPrompt(options.type, options.content, options.title)
-      const response = await this.callAI(prompt)
+文本内容：${text}
 
-      // 尝试解析JSON数组
-      try {
-        const parsed = JSON.parse(response)
-        if (Array.isArray(parsed)) {
-          return parsed.filter((t) => typeof t === 'string' && t.length > 0).slice(0, 3)
-        }
-      } catch {
-        // 如果不是JSON，尝试提取引号内的内容
-        const matches = response.match(/"([^"]+)"/g)
-        if (matches) {
-          return matches.map((m) => m.replace(/"/g, '')).slice(0, 3)
-        }
-      }
+请从以下类别中选择最合适的一个：
+- 投诉：用户或机构对服务、产品、政策等的投诉
+- 建议：对改进、优化提出的建议
+- 咨询：询问信息、政策、服务等
+- 表扬：对服务、产品、政策等的正面评价
+- 中性报道：客观的新闻报道，无明显倾向
+- 其他：不属于以上类别的其他类型
 
-      // 最后尝试按逗号分割
-      return response
-        .split(/[,，、]/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0)
-        .slice(0, 3)
-    } catch (error) {
-      console.error('话题识别失败，使用默认值:', error)
-      return []
-    }
-  }
-
-  /**
-   * 综合分析（一次性获取所有分析结果）
-   */
-  async analyze(options: AnalyzeOptions): Promise<AIAnalysisResult> {
-    if (this.mock) {
-      return await this.mockAnalyze(options)
-    }
-
-    const [sentimentResult, keywords, summary, category, topics] = await Promise.all([
-      this.analyzeSentiment(options),
-      this.extractKeywords(options),
-      this.generateSummary(options),
-      this.classifyCategory(options),
-      this.identifyTopics(options),
-    ])
-
-    return {
-      sentiment: sentimentResult.sentiment,
-      sentimentScore: sentimentResult.score,
-      keywords,
-      summary,
-      category,
-      topics,
-    }
-  }
-
-  /**
-   * AI对话
-   */
-  async chat(messages: ChatMessage[]): Promise<string> {
-    if (this.mock) {
-      // 模拟对话响应
-      await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 1200))
-      const lastMessage = messages[messages.length - 1]?.content || ''
-
-      if (lastMessage.includes('负面') || lastMessage.includes('负面舆情')) {
-        return '根据当前数据，今天共有约150条负面舆情，主要集中在社会热点和突发事件方面。'
-      }
-      if (lastMessage.includes('正面') || lastMessage.includes('正面舆情')) {
-        return '根据当前数据，今天共有约320条正面舆情，主要集中在科技发展和民生改善方面。'
-      }
-      if (lastMessage.includes('统计') || lastMessage.includes('多少')) {
-        return '当前数据库中共有网媒数据1200条，微博数据800条，其中已分析数据1500条。'
-      }
-
-      return '我已经理解您的问题。由于当前处于模拟模式，返回的是示例数据。请配置真实的AI API以获取准确的分析结果。'
-    }
-
-    try {
-      const systemMessage: ChatMessage = {
-        role: 'system',
-        content: CHAT_SYSTEM_PROMPT,
-      }
-
-      const response = await axios.post(
-        this.apiUrl!,
-        {
-          model: this.model,
-          messages: [systemMessage, ...messages].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          temperature: 0.7,
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.apiKey}`,
-          },
-        }
-      )
-
-      return response.data.choices[0]?.message?.content || '抱歉，无法生成回复。'
-    } catch (error) {
-      console.error('AI对话失败:', error)
-      return '抱歉，AI服务暂时不可用，请稍后重试。'
-    }
+请只返回类别名称，例如：投诉、建议、咨询、表扬、中性报道、其他。`
   }
 }
 
 /**
- * 创建AI分析器实例
+ * 创建 AI 分析器实例
  */
-export function createAIAnalyzer(config?: AIClientConfig): AIAnalyzer {
+export function createAIAnalyzer(config: AIAnalyzerConfig = {}): AIAnalyzer {
   return new AIAnalyzer(config)
 }
-

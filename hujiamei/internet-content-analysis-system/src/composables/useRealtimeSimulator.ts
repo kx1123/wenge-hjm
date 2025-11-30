@@ -105,8 +105,8 @@ export function useRealtimeSimulator() {
         // 刷新数据存储
         await dataStore.loadAll()
 
-        // 自动分析（可选）
-        const analyzer = createAIAnalyzer({ mock: true })
+        // 自动分析（使用真实AI API）
+        const analyzer = createAIAnalyzer({ mock: false })
         const analysisResult = await analyzer.analyze({
           type: simulatedItem.type,
           content: isWebMedia ? (item as WebMediaData).content : (item as WeiboData).content,

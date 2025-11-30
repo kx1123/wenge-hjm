@@ -125,13 +125,17 @@ npm run format
 创建 `.env` 文件：
 
 ```env
-VITE_AI_MOCK=true
-VITE_AI_API_URL=https://open.bigmodel.cn/api/paas/v4/chat/completions
-VITE_AI_API_KEY=your_api_key_here
+# 阿里通义千问API配置
+VITE_AI_MOCK=false
+VITE_AI_API_URL=https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation
+VITE_AI_API_KEY=sk-b48c6eb1c32242af82e89ee7582c66e9
+VITE_AI_MODEL=qwen-plus
 ```
 
-- `VITE_AI_MOCK=true`: 启用模拟AI（开发模式）
-- `VITE_AI_MOCK=false`: 使用真实AI API（需要配置API_KEY）
+- `VITE_AI_MOCK=false`: 使用真实AI API（阿里通义千问）
+- `VITE_AI_API_URL`: 通义千问API端点（已默认配置）
+- `VITE_AI_API_KEY`: 通义千问API密钥（已配置）
+- `VITE_AI_MODEL`: 模型名称（qwen-plus/qwen-turbo/qwen-max，默认qwen-plus）
 
 ## 数据格式
 

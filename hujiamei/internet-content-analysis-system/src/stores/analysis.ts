@@ -33,7 +33,8 @@ export const useAnalysisStore = defineStore('analysis', () => {
         return
       }
 
-      const analyzer = createAIAnalyzer({ mock: true })
+      // 使用真实AI API（阿里通义千问）
+      const analyzer = createAIAnalyzer({ mock: false })
 
       for (const item of unanalyzed) {
         try {
@@ -82,7 +83,8 @@ export const useAnalysisStore = defineStore('analysis', () => {
         return
       }
 
-      const analyzer = createAIAnalyzer({ mock: true })
+      // 使用真实AI API（阿里通义千问）
+      const analyzer = createAIAnalyzer({ mock: false })
 
       for (const item of unanalyzed) {
         try {

@@ -200,6 +200,7 @@ import {
   TooltipComponent,
   LegendComponent,
   GridComponent,
+  GraphicComponent,
 } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { useDataStore } from '@/stores/data'
@@ -218,6 +219,7 @@ use([
   TooltipComponent,
   LegendComponent,
   GridComponent,
+  GraphicComponent,
 ])
 
 const dataStore = useDataStore()
