@@ -42,6 +42,13 @@
             >
               AI智能分析
             </n-button>
+            <n-button
+              quaternary
+              :type="currentRoute === '/alert-system' ? 'primary' : 'default'"
+              @click="$router.push('/alert-system')"
+            >
+              智能预警
+            </n-button>
             </n-space>
           </div>
         </n-layout-header>
@@ -49,6 +56,17 @@
         <n-layout-content class="app-content">
           <router-view />
         </n-layout-content>
+
+        <!-- 预警 Toast -->
+        <AlertToast
+          v-for="toast in activeToasts"
+          :key="toast.id"
+          :level="toast.level"
+          :title="toast.title"
+          :message="toast.message"
+          :duration="toast.duration"
+          @close="removeToast(toast.id)"
+        />
 
         <!-- AI聊天助手（固定在底部） -->
         <!-- <div class="ai-chat-container">
@@ -61,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NConfigProvider,
@@ -75,12 +93,64 @@ import {
   darkTheme,
 } from 'naive-ui'
 import AIChatPanel from '@/components/AIChatPanel.vue'
+import AlertToast from '@/components/Alert/AlertToast.vue'
+import { useAlertStore } from '@/stores/alertStore'
+import type { AlertLevel } from '@/interfaces/alert'
 
 const route = useRoute()
 const router = useRouter()
+const alertStore = useAlertStore()
 
 const currentRoute = computed(() => route.path)
 const theme = darkTheme
+
+// 预警 Toast 管理
+interface ToastItem {
+  id: string
+  level: AlertLevel
+  title: string
+  message: string
+  duration: number
+}
+
+const activeToasts = ref<ToastItem[]>([])
+let lastAlertCount = 0
+
+// 监听新预警
+watch(
+  () => alertStore.alerts.length,
+  (newCount) => {
+    if (newCount > lastAlertCount) {
+      // 有新预警，显示 Toast
+      const newAlerts = alertStore.alerts.slice(0, newCount - lastAlertCount)
+      for (const alert of newAlerts.reverse()) {
+        // 只显示未处理的严重和警告级别预警
+        if (alert.status === 'unhandled' && (alert.level === 'critical' || alert.level === 'warning')) {
+          activeToasts.value.push({
+            id: alert.id,
+            level: alert.level,
+            title: alert.title,
+            message: alert.message,
+            duration: alert.level === 'critical' ? 8000 : 5000,
+          })
+        }
+      }
+    }
+    lastAlertCount = newCount
+  }
+)
+
+const removeToast = (id: string) => {
+  const index = activeToasts.value.findIndex((t) => t.id === id)
+  if (index !== -1) {
+    activeToasts.value.splice(index, 1)
+  }
+}
+
+onMounted(async () => {
+  await alertStore.init()
+  lastAlertCount = alertStore.alerts.length
+})
 </script>
 
 <style>

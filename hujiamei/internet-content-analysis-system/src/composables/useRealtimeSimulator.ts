@@ -3,6 +3,7 @@ import { getRandomUnanalyzedWebMedia, getRandomUnanalyzedWeibo } from '@/db/inde
 import type { WebMediaData, WeiboData } from '@/interfaces/data'
 import { createAnalysisEngine } from '@/ai/analysisEngine'
 import { useDataStore } from '@/stores/data'
+import { useAlertStore } from '@/stores/alertStore'
 import { useMessage } from 'naive-ui'
 
 /**
@@ -51,6 +52,7 @@ export function useRealtimeSimulator() {
   })
 
   const dataStore = useDataStore()
+  const alertStore = useAlertStore()
   const message = useMessage()
   let intervalId: number | null = null
   let timeoutId: number | null = null
@@ -232,6 +234,13 @@ export function useRealtimeSimulator() {
       // 添加到列表（最新在前）
       simulatedData.value.unshift(simulatedItem)
       latest.value = simulatedItem
+
+      // 新数据到来时检查预警
+      try {
+        alertStore.checkData(finalItem)
+      } catch (err) {
+        console.error('预警检查失败:', err)
+      }
 
       // 限制列表长度（保留最近50条）
       if (simulatedData.value.length > 50) {
