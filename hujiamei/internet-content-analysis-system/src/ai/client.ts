@@ -28,7 +28,15 @@ export class AIAnalyzer {
   constructor(config: AIClientConfig = {}) {
     this.mock = config.mock ?? import.meta.env.VITE_AI_MOCK === 'true'
     // 阿里通义千问API端点
-    this.apiUrl = config.apiUrl || import.meta.env.VITE_AI_API_URL || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'
+    // 开发环境使用代理，生产环境直接使用 API URL
+    const isDev = import.meta.env.DEV
+    if (isDev && !this.mock) {
+      // 开发环境使用本地代理
+      this.apiUrl = config.apiUrl || import.meta.env.VITE_AI_API_URL || '/api/ai'
+    } else {
+      // 生产环境或 mock 模式使用原始 API URL
+      this.apiUrl = config.apiUrl || import.meta.env.VITE_AI_API_URL || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'
+    }
     this.apiKey = config.apiKey || import.meta.env.VITE_AI_API_KEY || 'sk-b48c6eb1c32242af82e89ee7582c66e9'
     // 通义千问模型：qwen-plus（能力均衡）、qwen-turbo（速度快）、qwen-max（能力最强）
     this.model = config.model || import.meta.env.VITE_AI_MODEL || 'qwen-plus'
@@ -458,9 +466,25 @@ export class AIAnalyzer {
         }
       )
 
-      // 通义千问响应格式
-      const content = response.data?.output?.choices?.[0]?.message?.content
-      return content || response.data.choices?.[0]?.message?.content || '抱歉，无法生成回复。'
+      // 通义千问响应格式 - 支持多种格式
+      // 格式1: output.text (流式响应格式，优先检查)
+      let content = response.data?.output?.text
+      // 格式2: output.choices[0].message.content
+      if (!content) {
+        content = response.data?.output?.choices?.[0]?.message?.content
+      }
+      // 格式3: choices[0].message.content (旧格式)
+      if (!content) {
+        content = response.data?.choices?.[0]?.message?.content
+      }
+      
+      if (content && content.trim()) {
+        return content.trim()
+      }
+      
+      // 如果都没有，记录日志并返回错误
+      console.error('无法解析AI响应:', response.data)
+      return '抱歉，无法生成回复。'
     } catch (error: any) {
       console.error('AI对话失败:', error)
       if (error.response) {

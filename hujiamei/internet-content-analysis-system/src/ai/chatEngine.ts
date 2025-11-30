@@ -26,37 +26,97 @@ export function createChatEngine(
       
       if (intent.type === 'stats') {
         // 统计查询
-        const stats = await getStats()
-        queryResult = {
-          type: 'stats',
-          data: stats,
-          filters: intent.filters,
+        // 如果指定了具体日期，按日期查询
+        if (intent.filters?.date && typeof intent.filters.date === 'string' && intent.filters.date.includes('-')) {
+          const specificDate = dayjs(intent.filters.date)
+          const dateRange = {
+            start: specificDate.startOf('day').toISOString(),
+            end: specificDate.endOf('day').toISOString(),
+          }
+          const dataType = intent.filters?.dataType === 'webmedia' ? 'webmedia' : intent.filters?.dataType === 'weibo' ? 'weibo' : 'all'
+          
+          let results: any = null
+          if (dataType === 'all') {
+            // 查询所有类型
+            const [webmediaResults, weiboResults] = await Promise.all([
+              search({ type: 'webmedia', startTime: dateRange.start, endTime: dateRange.end }, 1, 1000),
+              search({ type: 'weibo', startTime: dateRange.start, endTime: dateRange.end }, 1, 1000),
+            ])
+            results = {
+              items: [...(webmediaResults.data || []), ...(weiboResults.data || [])],
+              total: (webmediaResults.total || 0) + (weiboResults.total || 0),
+            }
+          } else {
+            const searchResult = await search({
+              type: dataType,
+              startTime: dateRange.start,
+              endTime: dateRange.end,
+            }, 1, 1000)
+            results = {
+              items: searchResult.data || [],
+              total: searchResult.total || 0,
+            }
+          }
+          
+          queryResult = {
+            type: 'stats',
+            data: {
+              items: results.items || [],
+              total: results.total || 0,
+              date: intent.filters.date,
+            },
+            filters: intent.filters,
+          }
+        } else {
+          // 全局统计
+          const stats = await getStats()
+          queryResult = {
+            type: 'stats',
+            data: stats,
+            filters: intent.filters,
+          }
         }
       } else if (intent.type === 'detail') {
         // 详情查询
         const dataType = intent.filters?.dataType === 'webmedia' ? 'webmedia' : intent.filters?.dataType === 'weibo' ? 'weibo' : 'webmedia'
-        const results = await search({
+        const searchResult = await search({
           type: dataType,
           keyword: intent.filters?.keyword,
           sentiment: intent.filters?.sentiment,
         }, 1, 10)
         queryResult = {
           type: 'detail',
-          data: results,
+          data: {
+            items: searchResult.data || [],
+            total: searchResult.total || 0,
+          },
           filters: intent.filters,
         }
       } else if (intent.type === 'trend') {
         // 趋势分析
-        const dateRange = parseDateRange(intent.filters?.date || 'today')
+        let dateRange: { start: string; end: string }
+        if (intent.filters?.date && typeof intent.filters.date === 'string' && intent.filters.date.includes('-')) {
+          // 具体日期格式：YYYY-MM-DD
+          const specificDate = dayjs(intent.filters.date)
+          dateRange = {
+            start: specificDate.startOf('day').toISOString(),
+            end: specificDate.endOf('day').toISOString(),
+          }
+        } else {
+          dateRange = parseDateRange(intent.filters?.date as 'today' | 'yesterday' | 'week' | 'month' || 'today')
+        }
         const dataType = intent.filters?.dataType === 'webmedia' ? 'webmedia' : intent.filters?.dataType === 'weibo' ? 'weibo' : 'webmedia'
-        const results = await search({
+        const searchResult = await search({
           type: dataType,
           startTime: dateRange.start,
           endTime: dateRange.end,
         }, 1, 1000)
         queryResult = {
           type: 'trend',
-          data: results,
+          data: {
+            items: searchResult.data || [],
+            total: searchResult.total || 0,
+          },
           filters: intent.filters,
         }
       }
@@ -85,7 +145,7 @@ export function createChatEngine(
   async function parseIntent(message: string): Promise<{
     type: 'stats' | 'detail' | 'trend'
     filters?: {
-      date?: 'today' | 'yesterday' | 'week' | 'month'
+      date?: 'today' | 'yesterday' | 'week' | 'month' | string // 支持具体日期字符串
       dataType?: 'webmedia' | 'weibo' | 'all'
       keyword?: string
       sentiment?: 'positive' | 'neutral' | 'negative'
@@ -102,16 +162,61 @@ export function createChatEngine(
       type = 'detail'
     }
     
-    // 解析日期
-    let date: 'today' | 'yesterday' | 'week' | 'month' | undefined
-    if (lowerMessage.includes('今天') || lowerMessage.includes('今日')) {
-      date = 'today'
-    } else if (lowerMessage.includes('昨天') || lowerMessage.includes('昨日')) {
-      date = 'yesterday'
-    } else if (lowerMessage.includes('本周') || lowerMessage.includes('这周')) {
-      date = 'week'
-    } else if (lowerMessage.includes('本月') || lowerMessage.includes('这个月')) {
-      date = 'month'
+    // 解析日期 - 支持具体日期（如：11月7号、11月7日、2024-11-07等）
+    let date: 'today' | 'yesterday' | 'week' | 'month' | string | undefined
+    
+    // 先尝试解析具体日期
+    const datePatterns = [
+      /(\d{1,2})月(\d{1,2})[号日]/g,  // 11月7号、11月7日
+      /(\d{4})[年-](\d{1,2})[月-](\d{1,2})[号日]?/g,  // 2024年11月7日、2024-11-07
+      /(\d{1,2})\/(\d{1,2})/g,  // 11/7
+    ]
+    
+    let specificDate: string | undefined
+    for (const pattern of datePatterns) {
+      const match = message.match(pattern)
+      if (match) {
+        const dateStr = match[0]
+        // 尝试解析为具体日期
+        try {
+          let parsedDate: dayjs.Dayjs | null = null
+          if (dateStr.includes('月') && dateStr.includes('号')) {
+            // 11月7号格式
+            const parts = dateStr.match(/(\d{1,2})月(\d{1,2})号/)
+            if (parts) {
+              const month = parseInt(parts[1])
+              const day = parseInt(parts[2])
+              const year = dayjs().year() // 使用当前年份
+              parsedDate = dayjs(`${year}-${month}-${day}`)
+            }
+          } else if (dateStr.includes('-')) {
+            // 2024-11-07格式
+            parsedDate = dayjs(dateStr)
+          }
+          
+          if (parsedDate && parsedDate.isValid()) {
+            specificDate = parsedDate.format('YYYY-MM-DD')
+            break
+          }
+        } catch (e) {
+          // 解析失败，继续尝试其他格式
+        }
+      }
+    }
+    
+    if (specificDate) {
+      date = specificDate
+    } else {
+      // 解析相对日期
+      if (lowerMessage.includes('今天') || lowerMessage.includes('今日')) {
+        date = 'today'
+      } else if (lowerMessage.includes('昨天') || lowerMessage.includes('昨日')) {
+        date = 'yesterday'
+      } else if (lowerMessage.includes('本周') || lowerMessage.includes('这周')) {
+        date = 'week'
+      } else if (lowerMessage.includes('本月') || lowerMessage.includes('这个月')) {
+        date = 'month'
+      }
     }
     
     // 解析数据类型
@@ -201,12 +306,27 @@ export function createChatEngine(
         prompt += `查询结果：\n`
         if (queryResult.type === 'stats') {
           const stats = queryResult.data
-          prompt += `- 网媒数据：正面 ${stats.webmedia.positive} 条，中性 ${stats.webmedia.neutral} 条，负面 ${stats.webmedia.negative} 条\n`
-          prompt += `- 微博数据：正面 ${stats.weibos.positive} 条，中性 ${stats.weibos.neutral} 条，负面 ${stats.weibos.negative} 条\n`
+          // 如果是指定日期的查询结果
+          if (stats.items && Array.isArray(stats.items)) {
+            const total = stats.total || stats.items.length
+            const positive = stats.items.filter((item: any) => item.sentiment === 'positive').length
+            const neutral = stats.items.filter((item: any) => item.sentiment === 'neutral').length
+            const negative = stats.items.filter((item: any) => item.sentiment === 'negative').length
+            prompt += `- 指定日期共有 ${total} 条数据\n`
+            prompt += `- 正面：${positive} 条，中性：${neutral} 条，负面：${negative} 条\n`
+          } else if (stats.webmedia && stats.weibos) {
+            // 全局统计
+            prompt += `- 网媒数据：正面 ${stats.webmedia.bySentiment?.positive || stats.webmedia.positive || 0} 条，中性 ${stats.webmedia.bySentiment?.neutral || stats.webmedia.neutral || 0} 条，负面 ${stats.webmedia.bySentiment?.negative || stats.webmedia.negative || 0} 条\n`
+            prompt += `- 微博数据：正面 ${stats.weibos.bySentiment?.positive || stats.weibos.positive || 0} 条，中性 ${stats.weibos.bySentiment?.neutral || stats.weibos.neutral || 0} 条，负面 ${stats.weibos.bySentiment?.negative || stats.weibos.negative || 0} 条\n`
+          }
         } else if (queryResult.type === 'detail') {
-          prompt += `找到 ${queryResult.data.items.length} 条相关数据\n`
+          const data = queryResult.data
+          const items = data.items || data.data || []
+          prompt += `找到 ${items.length} 条相关数据\n`
         } else if (queryResult.type === 'trend') {
-          prompt += `找到 ${queryResult.data.items.length} 条数据用于趋势分析\n`
+          const data = queryResult.data
+          const items = data.items || data.data || []
+          prompt += `找到 ${items.length} 条数据用于趋势分析\n`
         }
       }
       

@@ -23,8 +23,27 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3000,
+    port: 3001,
     open: true,
+    proxy: {
+      // 代理阿里云通义千问 API
+      '/api/ai': {
+        target: 'https://dashscope.aliyuncs.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/ai/, '/api/v1/services/aigc/text-generation/generation'),
+        secure: true,
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            // 保留原始请求头（包括 Authorization）
+            // 客户端会在请求中设置 Authorization header
+            console.log('代理请求:', req.method, req.url)
+          })
+          proxy.on('error', (err, _req, _res) => {
+            console.error('代理错误:', err)
+          })
+        },
+      },
+    },
   },
 })
 

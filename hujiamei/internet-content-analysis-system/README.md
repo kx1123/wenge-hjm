@@ -110,7 +110,17 @@ npm install
 npm run dev
 ```
 
-访问 http://localhost:3000（端口在 `vite.config.ts` 中配置）
+访问 http://localhost:3001（端口在 `vite.config.ts` 中配置）
+
+### 代理配置（解决 CORS 问题）
+
+项目已配置本地代理来解决 CORS 问题：
+
+- **开发环境**：自动使用代理 `/api/ai` 转发到阿里云 API
+- **Mock 模式**：默认启用，无需配置 API Key（设置 `VITE_AI_MOCK=true`）
+- **真实 API 模式**：设置 `VITE_AI_MOCK=false`，代理会自动转发请求
+
+代理配置在 `vite.config.ts` 中，会自动处理 CORS 问题。
 
 ### 路由说明
 
