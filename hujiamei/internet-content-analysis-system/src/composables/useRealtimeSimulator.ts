@@ -3,6 +3,7 @@ import { getRandomUnanalyzedWebMedia, getRandomUnanalyzedWeibo } from '@/db/inde
 import type { WebMediaData, WeiboData } from '@/interfaces/data'
 import { createAIAnalyzer } from '@/ai/client'
 import { updateWebMediaData, updateWeiboData } from '@/db/indexedDB'
+import { useDataStore } from '@/stores/data'
 
 /**
  * 实时模拟器返回的数据项
@@ -19,11 +20,29 @@ export interface SimulatedDataItem {
  * 实时模拟器Composable
  * 方案A：每5-15秒随机推送一条未分析数据，标记为NEW，并触发高亮动画
  */
+export interface RealtimeStats {
+  webmediaNew: number
+  weiboNew: number
+  webmediaActive: number
+  weiboActive: number
+  webmediaInteraction: number
+  weiboInteraction: number
+}
+
 export function useRealtimeSimulator() {
   const isRunning = ref(false)
   const intervalId = ref<number | null>(null)
   const simulatedData = ref<SimulatedDataItem[]>([])
   const latestItem = ref<SimulatedDataItem | null>(null)
+  const stats = ref<RealtimeStats>({
+    webmediaNew: 0,
+    weiboNew: 0,
+    webmediaActive: 0,
+    weiboActive: 0,
+    webmediaInteraction: 0,
+    weiboInteraction: 0,
+  })
+  const dataStore = useDataStore()
 
   /**
    * 启动模拟
@@ -65,6 +84,26 @@ export function useRealtimeSimulator() {
         if (simulatedData.value.length > 50) {
           simulatedData.value = simulatedData.value.slice(0, 50)
         }
+
+        // 更新实时统计
+        if (isWebMedia) {
+          stats.value.webmediaNew++
+          const wm = item as WebMediaData
+          stats.value.webmediaActive = new Set(
+            dataStore.webmediaData.map((d) => d.source).filter(Boolean)
+          ).size
+          stats.value.webmediaInteraction += (wm.viewCount || 0) + (wm.shareCount || 0)
+        } else {
+          stats.value.weiboNew++
+          const wb = item as WeiboData
+          stats.value.weiboActive = new Set(
+            dataStore.weiboData.map((d) => d.userName).filter(Boolean)
+          ).size
+          stats.value.weiboInteraction += (wb.likeCount || 0) + (wb.commentCount || 0) + (wb.repostCount || 0)
+        }
+
+        // 刷新数据存储
+        await dataStore.loadAll()
 
         // 自动分析（可选）
         const analyzer = createAIAnalyzer({ mock: true })
@@ -137,6 +176,7 @@ export function useRealtimeSimulator() {
     isRunning,
     simulatedData,
     latestItem,
+    stats,
     start,
     stop,
   }

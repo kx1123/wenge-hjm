@@ -30,7 +30,7 @@
         <p class="text-xl font-semibold mt-4">
           {{ isDragging ? '松开鼠标上传文件' : '拖拽Excel文件到此处或点击上传' }}
         </p>
-        <p class="text-sm text-gray-500 mt-2">支持网媒数据.xlsx和微博数据.xlsx（最多2个文件）</p>
+        <p class="text-sm text-gray-500 mt-2">支持网媒数据和微博数据（.xlsx 或 .xls 格式，最多2个文件）</p>
       </div>
     </div>
 

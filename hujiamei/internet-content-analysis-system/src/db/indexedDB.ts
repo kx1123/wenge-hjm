@@ -388,6 +388,13 @@ export async function getAllWebMedia(
 }
 
 /**
+ * 获取所有网媒数据（不分页，获取全部）
+ */
+export async function getAllWebMediaAll(): Promise<WebMediaData[]> {
+  return await db.webmedia.orderBy('publishTime').reverse().toArray()
+}
+
+/**
  * 获取所有微博数据（分页）
  */
 export async function getAllWeibos(
@@ -399,6 +406,13 @@ export async function getAllWeibos(
     data: result.data as WeiboData[],
     total: result.total,
   }
+}
+
+/**
+ * 获取所有微博数据（不分页，获取全部）
+ */
+export async function getAllWeibosAll(): Promise<WeiboData[]> {
+  return await db.weibos.orderBy('publishTime').reverse().toArray()
 }
 
 /**

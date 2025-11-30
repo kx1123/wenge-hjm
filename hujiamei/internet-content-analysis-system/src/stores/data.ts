@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { WebMediaData, WeiboData } from '@/interfaces/data'
-import { addWebMediaData, addWeiboData, getAllWebMedia, getAllWeibos } from '@/db/indexedDB'
+import {
+  addWebMediaData,
+  addWeiboData,
+  getAllWebMedia,
+  getAllWeibos,
+  getAllWebMediaAll,
+  getAllWeibosAll,
+} from '@/db/indexedDB'
 
 export const useDataStore = defineStore('data', () => {
   // 原始数据
@@ -156,15 +163,26 @@ export const useDataStore = defineStore('data', () => {
   }
 
   /**
-   * 加载网媒数据
+   * 加载网媒数据（加载全部数据）
    */
-  async function loadWebMedia(page: number = 1, pageSize: number = 1000) {
+  async function loadWebMedia(page?: number, pageSize?: number) {
     try {
       loading.value = true
       error.value = null
-      const result = await getAllWebMedia(page, pageSize)
-      webmediaData.value = result.data
-      return result
+      // 如果指定了分页参数，使用分页加载；否则加载全部数据
+      if (page !== undefined && pageSize !== undefined) {
+        const result = await getAllWebMedia(page, pageSize)
+        webmediaData.value = result.data
+        return result
+      } else {
+        // 加载全部数据
+        const allData = await getAllWebMediaAll()
+        webmediaData.value = allData
+        return {
+          data: allData,
+          total: allData.length,
+        }
+      }
     } catch (err) {
       error.value = err instanceof Error ? err.message : '加载网媒数据失败'
       throw err
@@ -174,15 +192,26 @@ export const useDataStore = defineStore('data', () => {
   }
 
   /**
-   * 加载微博数据
+   * 加载微博数据（加载全部数据）
    */
-  async function loadWeibos(page: number = 1, pageSize: number = 1000) {
+  async function loadWeibos(page?: number, pageSize?: number) {
     try {
       loading.value = true
       error.value = null
-      const result = await getAllWeibos(page, pageSize)
-      weiboData.value = result.data
-      return result
+      // 如果指定了分页参数，使用分页加载；否则加载全部数据
+      if (page !== undefined && pageSize !== undefined) {
+        const result = await getAllWeibos(page, pageSize)
+        weiboData.value = result.data
+        return result
+      } else {
+        // 加载全部数据
+        const allData = await getAllWeibosAll()
+        weiboData.value = allData
+        return {
+          data: allData,
+          total: allData.length,
+        }
+      }
     } catch (err) {
       error.value = err instanceof Error ? err.message : '加载微博数据失败'
       throw err

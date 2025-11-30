@@ -130,6 +130,12 @@
       <div class="data-display-area">
         <!-- 列表模式 -->
         <div v-if="viewMode === 'list'" class="list-view">
+          <div class="pagination-info-top">
+            <span class="total-info">共 {{ formatNumber(total) }} 条数据</span>
+            <span class="page-info">
+              第 {{ currentPage }} 页，每页 {{ pageSize }} 条，共 {{ totalPages }} 页
+            </span>
+          </div>
           <n-data-table
             :columns="tableColumns"
             :data="displayData"
@@ -192,16 +198,24 @@
               </div>
             </div>
           </div>
-          <n-pagination
-            v-model:page="currentPage"
-            v-model:page-size="pageSize"
-            :item-count="total"
-            :page-sizes="[20, 50, 100]"
-            show-size-picker
-            show-quick-jumper
-            @update:page="handlePageChange"
-            @update:page-size="handlePageSizeChange"
-          />
+          <div class="pagination-wrapper">
+            <div class="pagination-info">
+              <span class="total-info">共 {{ formatNumber(total) }} 条数据</span>
+              <span class="page-info">
+                第 {{ currentPage }} 页，每页 {{ pageSize }} 条，共 {{ total > 0 ? Math.ceil(total / pageSize) : 1 }} 页
+              </span>
+            </div>
+            <n-pagination
+              v-model:page="currentPage"
+              v-model:page-size="pageSize"
+              :item-count="total"
+              :page-sizes="[20, 50, 100]"
+              show-size-picker
+              show-quick-jumper
+              @update:page="handlePageChange"
+              @update:page-size="handlePageSizeChange"
+            />
+          </div>
         </div>
 
         <!-- 时间轴模式 -->
@@ -232,16 +246,24 @@
               </div>
             </div>
           </div>
-          <n-pagination
-            v-model:page="currentPage"
-            v-model:page-size="pageSize"
-            :item-count="total"
-            :page-sizes="[20, 50, 100]"
-            show-size-picker
-            show-quick-jumper
-            @update:page="handlePageChange"
-            @update:page-size="handlePageSizeChange"
-          />
+          <div class="pagination-wrapper">
+            <div class="pagination-info">
+              <span class="total-info">共 {{ formatNumber(total) }} 条数据</span>
+              <span class="page-info">
+                第 {{ currentPage }} 页，每页 {{ pageSize }} 条，共 {{ total > 0 ? Math.ceil(total / pageSize) : 1 }} 页
+              </span>
+            </div>
+            <n-pagination
+              v-model:page="currentPage"
+              v-model:page-size="pageSize"
+              :item-count="total"
+              :page-sizes="[20, 50, 100]"
+              show-size-picker
+              show-quick-jumper
+              @update:page="handlePageChange"
+              @update:page-size="handlePageSizeChange"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -391,6 +413,12 @@ const tableColumns = computed<DataTableColumns<UnifiedData>>(() => [
   },
 ])
 
+// 计算总页数
+const totalPages = computed(() => {
+  if (total.value === 0) return 1
+  return Math.ceil(total.value / pageSize.value)
+})
+
 // 分页配置
 const pagination = computed(() => ({
   page: currentPage.value,
@@ -497,9 +525,19 @@ const loadData = async () => {
       total.value = result.total
     } else if (viewType.value === 'compare') {
       // 对比模式：显示两个数据源的对比
+      // 先获取总数（使用 page=1, size=1 来获取 total，不关心实际数据）
+      const [webmediaTotalResult, weiboTotalResult] = await Promise.all([
+        search({ type: 'webmedia' }, 1, 1),
+        search({ type: 'weibo' }, 1, 1),
+      ])
+
+      const totalCount = webmediaTotalResult.total + weiboTotalResult.total
+
+      // 获取当前页的数据（每个数据源各取一半）
+      const halfPageSize = Math.ceil(pageSize.value / 2)
       const [webmediaResult, weiboResult] = await Promise.all([
-        search({ type: 'webmedia' }, 1, 50),
-        search({ type: 'weibo' }, 1, 50),
+        search({ type: 'webmedia' }, currentPage.value, halfPageSize),
+        search({ type: 'weibo' }, currentPage.value, halfPageSize),
       ])
 
       const webmediaUnified = (webmediaResult.data as WebMediaData[]).map(toUnifiedData)
@@ -514,7 +552,7 @@ const loadData = async () => {
       }
 
       displayData.value = merged
-      total.value = webmediaResult.total + weiboResult.total
+      total.value = totalCount
     }
   } catch (error) {
     message.error('加载数据失败')
@@ -921,6 +959,49 @@ const getSentimentText = (sentiment: string): string => {
   padding: 0.25rem 0.5rem;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 4px;
+}
+
+/* 分页信息样式 */
+.pagination-info-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.2) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+}
+
+.pagination-wrapper {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pagination-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.2) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+}
+
+.total-info {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #00ffff;
+  text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+}
+
+.page-info {
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 /* 响应式 */

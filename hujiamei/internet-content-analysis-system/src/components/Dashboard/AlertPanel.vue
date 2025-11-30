@@ -1,9 +1,15 @@
 <template>
   <div class="alert-panel">
-    <n-card title="预警规则管理">
+    <div class="section-title">
+      <span class="title-line"></span>
+      <span class="title-text">预警规则管理</span>
+      <span class="title-line"></span>
+    </div>
+    <div class="alert-card">
       <n-space vertical>
         <!-- 关键词预警 -->
-        <n-card size="small" title="关键词预警">
+        <div class="rule-section">
+          <div class="rule-title">关键词预警</div>
           <n-space>
             <n-input
               v-model:value="keywordInput"
@@ -31,10 +37,11 @@
               </n-space>
             </n-list-item>
           </n-list>
-        </n-card>
+        </div>
 
         <!-- 情感预警 -->
-        <n-card size="small" title="情感预警">
+        <div class="rule-section">
+          <div class="rule-title">情感预警</div>
           <n-space>
             <n-select
               v-model:value="sentimentType"
@@ -77,10 +84,11 @@
               </n-space>
             </n-list-item>
           </n-list>
-        </n-card>
+        </div>
 
         <!-- 热度预警 -->
-        <n-card size="small" title="热度预警">
+        <div class="rule-section">
+          <div class="rule-title">热度预警</div>
           <n-space>
             <n-input-number
               v-model:value="volumeThreshold"
@@ -117,12 +125,17 @@
               </n-space>
             </n-list-item>
           </n-list>
-        </n-card>
+        </div>
       </n-space>
-    </n-card>
+    </div>
 
     <!-- 预警记录 -->
-    <n-card title="预警记录" class="mt-4">
+    <div class="section-title mt-6">
+      <span class="title-line"></span>
+      <span class="title-text">预警记录</span>
+      <span class="title-line"></span>
+    </div>
+    <div class="alert-card">
       <n-list>
         <n-list-item v-for="alert in alerts" :key="alert.id">
           <n-space justify="space-between" align="center" style="width: 100%">
@@ -141,7 +154,7 @@
           </n-space>
         </n-list-item>
       </n-list>
-    </n-card>
+    </div>
   </div>
 </template>
 
@@ -252,6 +265,137 @@ const formatTime = (time: string) => {
 <style scoped>
 .alert-panel {
   width: 100%;
+  margin-top: 2rem;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.title-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(0, 255, 255, 0.5) 50%, transparent 100%);
+}
+
+.section-title .title-text {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #00ffff;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+}
+
+.alert-card {
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.2) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+}
+
+.alert-card:hover {
+  border-color: rgba(0, 255, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 255, 255, 0.2);
+}
+
+/* 覆盖 Naive UI 组件样式 */
+:deep(.n-card) {
+  background: transparent !important;
+  border: none !important;
+}
+
+:deep(.n-card-header) {
+  color: #00ffff !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+:deep(.n-list-item) {
+  background: rgba(0, 0, 0, 0.3) !important;
+  border-radius: 8px !important;
+  margin-bottom: 0.75rem !important;
+  padding: 1rem !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  transition: all 0.3s ease !important;
+}
+
+:deep(.n-list-item:hover) {
+  border-color: rgba(0, 255, 255, 0.3) !important;
+  box-shadow: 0 4px 20px rgba(0, 255, 255, 0.1) !important;
+}
+
+:deep(.n-input),
+:deep(.n-select),
+:deep(.n-input-number) {
+  background: rgba(0, 0, 0, 0.3) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+}
+
+:deep(.n-input:focus),
+:deep(.n-select:focus),
+:deep(.n-input-number:focus) {
+  border-color: #00ffff !important;
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.3) !important;
+}
+
+:deep(.n-button--primary-type) {
+  background: linear-gradient(135deg, #00ffff 0%, #0099ff 100%) !important;
+  border: none !important;
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.5) !important;
+}
+
+:deep(.n-button--primary-type:hover) {
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.7) !important;
+  transform: translateY(-2px);
+}
+
+:deep(.n-button--error-type) {
+  background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%) !important;
+  border: none !important;
+}
+
+:deep(.n-tag) {
+  background: rgba(0, 255, 255, 0.2) !important;
+  border: 1px solid rgba(0, 255, 255, 0.4) !important;
+  color: #00ffff !important;
+}
+
+:deep(.n-switch) {
+  --n-color: rgba(0, 255, 255, 0.3) !important;
+}
+
+:deep(.n-switch--checked) {
+  --n-color: #00ffff !important;
+}
+
+.rule-section {
+  padding: 1.25rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  transition: all 0.3s ease;
+}
+
+.rule-section:hover {
+  border-color: rgba(0, 255, 255, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 255, 255, 0.1);
+}
+
+.rule-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #00ffff;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
 }
 </style>
 

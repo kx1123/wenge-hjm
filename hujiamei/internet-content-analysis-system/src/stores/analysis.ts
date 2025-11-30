@@ -44,7 +44,12 @@ export const useAnalysisStore = defineStore('analysis', () => {
           })
 
           await updateWebMediaData(item.id!, {
-            ...result,
+            sentiment: result.sentiment,
+            sentimentScore: result.sentimentScore,
+            aiKeywords: result.keywords,
+            aiSummary: result.summary,
+            aiCategory: result.category,
+            topics: result.topics,
             analyzedAt: new Date().toISOString(),
           })
 
@@ -88,7 +93,12 @@ export const useAnalysisStore = defineStore('analysis', () => {
           })
 
           await updateWeiboData(item.id!, {
-            ...result,
+            sentiment: result.sentiment,
+            sentimentScore: result.sentimentScore,
+            aiKeywords: result.keywords,
+            aiSummary: result.summary,
+            aiCategory: result.category,
+            topics: result.topics,
             analyzedAt: new Date().toISOString(),
           })
 

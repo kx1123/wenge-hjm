@@ -1,8 +1,19 @@
 import axios from 'axios'
-import type { AIAnalysisResult, AnalyzeOptions, AIClientConfig, ChatMessage } from '@/interfaces/ai'
+import type {
+  AIAnalysisResult,
+  AnalyzeOptions,
+  AIClientConfig,
+  ChatMessage,
+  SentimentAnalysisResult,
+  HotWordAnalysis,
+  TopicCluster,
+  EventCorrelation,
+} from '@/interfaces/ai'
 import { getSentimentPrompt } from './prompts/sentiment'
 import { getKeywordsPrompt } from './prompts/keywords'
-import { getSummaryPrompt } from './prompts/summary'
+import { getSummaryPrompt, getMergedSummaryPrompt } from './prompts/summary'
+import { getCategoryPrompt } from './prompts/category'
+import { getTopicPrompt } from './prompts/topic'
 import { CHAT_SYSTEM_PROMPT } from './prompts/chat'
 
 /**
@@ -30,6 +41,7 @@ export class AIAnalyzer {
 
     const sentiments: Array<'positive' | 'neutral' | 'negative'> = ['positive', 'neutral', 'negative']
     const sentiment = sentiments[Math.floor(Math.random() * 3)]
+    const sentimentScore = sentiment === 'positive' ? 60 + Math.random() * 40 : sentiment === 'negative' ? Math.random() * 40 : 40 + Math.random() * 20
 
     // 简单的关键词提取（基于内容长度）
     const keywords = [
@@ -39,10 +51,16 @@ export class AIAnalyzer {
       sentiment === 'positive' ? '正面' : sentiment === 'negative' ? '负面' : '中性',
     ]
 
+    const categories = ['投诉', '建议', '咨询', '表扬', '中性报道', '其他']
+    const category = categories[Math.floor(Math.random() * categories.length)]
+
     return {
       sentiment,
+      sentimentScore: Math.round(sentimentScore),
       keywords,
       summary: `这是一条${sentiment === 'positive' ? '正面' : sentiment === 'negative' ? '负面' : '中性'}的${options.type === 'webmedia' ? '网媒' : '微博'}内容。`,
+      category,
+      topics: [keywords[0], keywords[1]],
     }
   }
 
@@ -83,12 +101,16 @@ export class AIAnalyzer {
   }
 
   /**
-   * 分析情感
+   * 分析情感（带评分）
    */
-  async analyzeSentiment(options: AnalyzeOptions): Promise<'positive' | 'neutral' | 'negative'> {
+  async analyzeSentiment(options: AnalyzeOptions): Promise<SentimentAnalysisResult> {
     if (this.mock) {
       const result = await this.mockAnalyze(options)
-      return result.sentiment
+      return {
+        sentiment: result.sentiment,
+        score: result.sentimentScore || 50,
+        confidence: 0.8,
+      }
     }
 
     try {
@@ -99,19 +121,50 @@ export class AIAnalyzer {
         options.userName
       )
       const response = await this.callAI(prompt)
-      const sentiment = response.trim().toLowerCase()
 
-      if (['positive', 'neutral', 'negative'].includes(sentiment)) {
-        return sentiment as 'positive' | 'neutral' | 'negative'
+      // 尝试解析JSON
+      try {
+        const parsed = JSON.parse(response)
+        if (parsed.sentiment && typeof parsed.score === 'number') {
+          return {
+            sentiment: parsed.sentiment as 'positive' | 'neutral' | 'negative',
+            score: Math.max(0, Math.min(100, parsed.score)),
+            confidence: parsed.confidence,
+          }
+        }
+      } catch {
+        // 如果不是JSON，尝试文本解析
+        const sentiment = response.trim().toLowerCase()
+        let score = 50
+
+        if (sentiment.includes('positive') || sentiment.includes('正面')) {
+          score = 60 + Math.random() * 40
+        } else if (sentiment.includes('negative') || sentiment.includes('负面')) {
+          score = Math.random() * 40
+        } else {
+          score = 40 + Math.random() * 20
+        }
+
+        return {
+          sentiment: sentiment.includes('positive') || sentiment.includes('正面')
+            ? 'positive'
+            : sentiment.includes('negative') || sentiment.includes('负面')
+            ? 'negative'
+            : 'neutral',
+          score: Math.round(score),
+        }
       }
-
-      // 如果返回的不是标准格式，尝试解析
-      if (response.includes('正面') || response.includes('positive')) return 'positive'
-      if (response.includes('负面') || response.includes('negative')) return 'negative'
-      return 'neutral'
     } catch (error) {
       console.error('情感分析失败，使用默认值:', error)
-      return 'neutral'
+      return {
+        sentiment: 'neutral',
+        score: 50,
+      }
+    }
+
+    return {
+      sentiment: 'neutral',
+      score: 50,
     }
   }
 
@@ -155,7 +208,7 @@ export class AIAnalyzer {
   }
 
   /**
-   * 生成摘要
+   * 生成摘要（支持自定义长度）
    */
   async generateSummary(options: AnalyzeOptions): Promise<string> {
     if (this.mock) {
@@ -164,12 +217,110 @@ export class AIAnalyzer {
     }
 
     try {
-      const prompt = getSummaryPrompt(options.type, options.content, options.title)
+      const prompt = getSummaryPrompt(
+        options.type,
+        options.content,
+        options.title,
+        options.summaryLength
+      )
       const response = await this.callAI(prompt)
       return response.trim()
     } catch (error) {
       console.error('摘要生成失败，使用默认值:', error)
       return '摘要生成失败'
+    }
+  }
+
+  /**
+   * 生成合并摘要（多条舆情智能合并）
+   */
+  async generateMergedSummary(
+    items: Array<{ type: 'webmedia' | 'weibo'; content: string; title?: string }>,
+    length?: number
+  ): Promise<string> {
+    if (this.mock) {
+      await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 1200))
+      return `合并摘要：综合了${items.length}条${items[0]?.type === 'webmedia' ? '网媒' : '微博'}内容，主要涉及舆情分析和数据统计。`
+    }
+
+    try {
+      const prompt = getMergedSummaryPrompt(items, length)
+      const response = await this.callAI(prompt)
+      return response.trim()
+    } catch (error) {
+      console.error('合并摘要生成失败:', error)
+      return '合并摘要生成失败'
+    }
+  }
+
+  /**
+   * 舆情分类
+   */
+  async classifyCategory(options: AnalyzeOptions): Promise<string> {
+    if (this.mock) {
+      const result = await this.mockAnalyze(options)
+      return result.category || '其他'
+    }
+
+    try {
+      const prompt = getCategoryPrompt(options.type, options.content, options.title)
+      const response = await this.callAI(prompt)
+      const category = response.trim()
+
+      const validCategories = ['投诉', '建议', '咨询', '表扬', '中性报道', '中性讨论', '其他']
+      if (validCategories.includes(category)) {
+        return category
+      }
+
+      // 尝试匹配
+      if (category.includes('投诉')) return '投诉'
+      if (category.includes('建议')) return '建议'
+      if (category.includes('咨询')) return '咨询'
+      if (category.includes('表扬')) return '表扬'
+      if (category.includes('中性')) return options.type === 'webmedia' ? '中性报道' : '中性讨论'
+      return '其他'
+    } catch (error) {
+      console.error('舆情分类失败，使用默认值:', error)
+      return '其他'
+    }
+  }
+
+  /**
+   * 话题识别
+   */
+  async identifyTopics(options: AnalyzeOptions): Promise<string[]> {
+    if (this.mock) {
+      const result = await this.mockAnalyze(options)
+      return result.topics || []
+    }
+
+    try {
+      const prompt = getTopicPrompt(options.type, options.content, options.title)
+      const response = await this.callAI(prompt)
+
+      // 尝试解析JSON数组
+      try {
+        const parsed = JSON.parse(response)
+        if (Array.isArray(parsed)) {
+          return parsed.filter((t) => typeof t === 'string' && t.length > 0).slice(0, 3)
+        }
+      } catch {
+        // 如果不是JSON，尝试提取引号内的内容
+        const matches = response.match(/"([^"]+)"/g)
+        if (matches) {
+          return matches.map((m) => m.replace(/"/g, '')).slice(0, 3)
+        }
+      }
+
+      // 最后尝试按逗号分割
+      return response
+        .split(/[,，、]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .slice(0, 3)
+    } catch (error) {
+      console.error('话题识别失败，使用默认值:', error)
+      return []
     }
   }
 
@@ -181,16 +332,21 @@ export class AIAnalyzer {
       return await this.mockAnalyze(options)
     }
 
-    const [sentiment, keywords, summary] = await Promise.all([
+    const [sentimentResult, keywords, summary, category, topics] = await Promise.all([
       this.analyzeSentiment(options),
       this.extractKeywords(options),
       this.generateSummary(options),
+      this.classifyCategory(options),
+      this.identifyTopics(options),
     ])
 
     return {
-      sentiment,
+      sentiment: sentimentResult.sentiment,
+      sentimentScore: sentimentResult.score,
       keywords,
       summary,
+      category,
+      topics,
     }
   }
 

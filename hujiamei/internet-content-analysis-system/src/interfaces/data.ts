@@ -19,12 +19,13 @@ export interface WebMediaData {
   region: string // 地区
   // AI分析字段（可选）
   sentiment?: 'positive' | 'neutral' | 'negative'
-  sentimentScore?: number // 情感得分
+  sentimentScore?: number // 情感得分（0-100）
   keywords?: string[] // AI提取的关键词
   aiKeywords?: string[] // AI关键词（别名）
   summary?: string // AI生成的摘要
   aiSummary?: string // AI摘要（别名）
-  aiCategory?: string // AI分类
+  aiCategory?: string // AI分类（投诉/建议/咨询/表扬/中性报道等）
+  topics?: string[] // 话题标签（用于聚类分析）
   isWarning?: boolean // 是否预警
   warningLevel?: 'low' | 'medium' | 'high' // 预警级别
   analyzedAt?: string // 分析时间
@@ -50,12 +51,13 @@ export interface WeiboData {
   region: string // 地区
   // AI分析字段（可选）
   sentiment?: 'positive' | 'neutral' | 'negative'
-  sentimentScore?: number // 情感得分
+  sentimentScore?: number // 情感得分（0-100）
   keywords?: string[] // AI提取的关键词
   aiKeywords?: string[] // AI关键词（别名）
   summary?: string // AI生成的摘要
   aiSummary?: string // AI摘要（别名）
-  aiCategory?: string // AI分类
+  aiCategory?: string // AI分类（投诉/建议/咨询/表扬/中性报道等）
+  topics?: string[] // 话题标签（用于聚类分析）
   isWarning?: boolean // 是否预警
   warningLevel?: 'low' | 'medium' | 'high' // 预警级别
   analyzedAt?: string // 分析时间
@@ -115,6 +117,7 @@ export interface UnifiedData {
   summary?: string
   aiSummary?: string
   aiCategory?: string
+  topics?: string[]
   isWarning?: boolean
   warningLevel?: WarningLevel
   analyzedAt?: string
@@ -175,6 +178,7 @@ export function toUnifiedData(data: WebMediaData): UnifiedData {
     summary: data.summary || data.aiSummary,
     aiSummary: data.aiSummary,
     aiCategory: data.aiCategory,
+    topics: data.topics,
     isWarning: data.isWarning,
     warningLevel: data.warningLevel,
     analyzedAt: data.analyzedAt,
@@ -209,6 +213,7 @@ export function toUnifiedDataFromWeibo(data: WeiboData): UnifiedData {
     summary: data.summary || data.aiSummary,
     aiSummary: data.aiSummary,
     aiCategory: data.aiCategory,
+    topics: data.topics,
     isWarning: data.isWarning,
     warningLevel: data.warningLevel,
     analyzedAt: data.analyzedAt,
