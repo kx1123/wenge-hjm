@@ -87,7 +87,7 @@ const message = useMessage()
 const showRuleEditor = ref(false)
 const loading = ref(false)
 
-const stats = computed(() => alertStore.stats)
+const stats = computed(() => alertStore.alertStats)
 
 const handleRefresh = async () => {
   loading.value = true

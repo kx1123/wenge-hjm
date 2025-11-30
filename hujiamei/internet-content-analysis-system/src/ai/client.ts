@@ -32,7 +32,10 @@ export interface KeywordResult {
 export class AIAnalyzer {
   private mock: boolean
   private apiKey: string
-  private apiUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'
+  // 使用代理路径避免 CORS 问题
+  private apiUrl = import.meta.env.DEV 
+    ? '/api/dashscope' // 开发环境使用代理
+    : 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation' // 生产环境直接调用
   private model = 'qwen-turbo'
 
   constructor(config: AIAnalyzerConfig = {}) {
@@ -123,12 +126,7 @@ export class AIAnalyzer {
               messages: [
                 {
                   role: 'user',
-                  content: [
-                    {
-                      type: 'text',
-                      text: prompt,
-                    },
-                  ],
+                  content: prompt, // 直接使用字符串，不是数组
                 },
               ],
             },
@@ -142,6 +140,7 @@ export class AIAnalyzer {
             headers: {
               'Authorization': `Bearer ${this.apiKey}`,
               'Content-Type': 'application/json',
+              'X-DashScope-SSE': 'disable', // 禁用 SSE
             },
           }
         )
@@ -157,12 +156,24 @@ export class AIAnalyzer {
       } catch (error: any) {
         lastError = error instanceof Error ? error : new Error(String(error))
         const status = error.response?.status
+        const errorData = error.response?.data
+
+        // 403 错误：权限问题，记录详细信息
+        if (status === 403) {
+          console.error('API 403 错误 - 权限问题:', {
+            message: errorData?.message || error.message,
+            code: errorData?.code,
+            requestId: errorData?.request_id,
+            apiKey: this.apiKey ? `${this.apiKey.substring(0, 10)}...` : '未设置',
+          })
+          throw new Error(`API 403 错误：${errorData?.message || '权限被拒绝，请检查 API Key 是否有效'}`)
+        }
 
         // HTTP 429 (限流) 或 500 (服务器错误) 时重试
         if ((status === 429 || status === 500) && attempt < maxRetries) {
           // 指数退避：1s, 2s, 4s
           const delay = Math.pow(2, attempt) * 1000
-          console.warn(`API调用失败，${delay}ms后重试 (${attempt + 1}/${maxRetries})...`, error.response?.data)
+          console.warn(`API调用失败，${delay}ms后重试 (${attempt + 1}/${maxRetries})...`, errorData)
           await new Promise((resolve) => setTimeout(resolve, delay))
           continue
         }
@@ -760,4 +771,11 @@ export class AIAnalyzer {
  */
 export function createAIAnalyzer(config: AIAnalyzerConfig = {}): AIAnalyzer {
   return new AIAnalyzer(config)
+}
+
+/**
+ * 创建通义千问分析器实例（别名）
+ */
+export function createQwenAnalyzer(config: AIAnalyzerConfig = {}): AIAnalyzer {
+  return createAIAnalyzer(config)
 }

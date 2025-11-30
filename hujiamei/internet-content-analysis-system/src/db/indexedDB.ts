@@ -23,20 +23,20 @@ class ContentAnalysisDB extends Dexie {
   webmedia!: Table<WebMediaData, number>
   weibos!: Table<WeiboData, number>
   aiCache!: Table<AICache, number>
-  alerts!: Table<AlertRecord, string>
+  alerts!: Table<AlertEvent, string>
   alertRules!: Table<AlertRule, string>
 
   constructor() {
     super('ContentAnalysisDB')
-    this.version(3).stores({
+    this.version(4).stores({
       // 表 webmedia：字段 + 索引 ['publishTime', 'sentiment', 'source']
       webmedia: '++id, publishTime, sentiment, source',
       // 表 weibos：字段 + 索引 ['publishTime', 'sentiment', 'userName']
       weibos: '++id, publishTime, sentiment, userName',
       // AI缓存表：key = `${hash(content)}_${dataType}_${promptVersion}`
       aiCache: '++id, cacheKey, dataType, promptType, expiresAt',
-      // 预警记录表：id 为字符串，索引 createdAt, level, status, ruleType
-      alerts: 'id, createdAt, level, status, ruleType, eventId',
+      // 预警记录表：id 为字符串，索引 triggeredAt, level, status, ruleId
+      alerts: 'id, triggeredAt, level, status, ruleId',
       // 预警规则表：id 为字符串，索引 type, enabled
       alertRules: 'id, type, enabled',
     })

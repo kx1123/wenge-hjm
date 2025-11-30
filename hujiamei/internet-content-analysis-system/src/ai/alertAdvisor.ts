@@ -11,7 +11,10 @@ type SentimentData = WebMediaData | WeiboData
  */
 export class AlertAdvisor {
   private apiKey: string
-  private apiUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'
+  // 使用代理路径避免 CORS 问题
+  private apiUrl = import.meta.env.DEV 
+    ? '/api/dashscope' // 开发环境使用代理
+    : 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation' // 生产环境直接调用
   private model = 'qwen-turbo'
   private mock: boolean
 
@@ -48,12 +51,7 @@ export class AlertAdvisor {
               messages: [
                 {
                   role: 'user',
-                  content: [
-                    {
-                      type: 'text',
-                      text: prompt,
-                    },
-                  ],
+                  content: prompt, // 直接使用字符串，不是数组
                 },
               ],
             },
@@ -67,6 +65,7 @@ export class AlertAdvisor {
             headers: {
               'Authorization': `Bearer ${this.apiKey}`,
               'Content-Type': 'application/json',
+              'X-DashScope-SSE': 'disable', // 禁用 SSE
             },
           }
         )

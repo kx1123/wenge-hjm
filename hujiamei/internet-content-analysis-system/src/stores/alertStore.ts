@@ -45,11 +45,21 @@ export const useAlertStore = defineStore('alert', () => {
    * 预警统计
    */
   const alertStats = computed(() => {
+    const total = alerts.value.length
+    const unhandled = alerts.value.filter((a) => a.status === 'unhandled').length
+    const processing = alerts.value.filter((a) => a.status === 'processing').length
+    const resolved = alerts.value.filter((a) => a.status === 'resolved').length
+    
     return {
-      total: alerts.value.length,
-      critical: alerts.value.filter((a) => a.level === 'critical').length,
-      warning: alerts.value.filter((a) => a.level === 'warning').length,
-      info: alerts.value.filter((a) => a.level === 'info').length,
+      total,
+      unhandled,
+      processing,
+      resolved,
+      byLevel: {
+        critical: alerts.value.filter((a) => a.level === 'critical').length,
+        warning: alerts.value.filter((a) => a.level === 'warning').length,
+        info: alerts.value.filter((a) => a.level === 'info').length,
+      },
     }
   })
   

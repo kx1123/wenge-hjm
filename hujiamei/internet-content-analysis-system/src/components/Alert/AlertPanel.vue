@@ -65,11 +65,11 @@
             <div class="alert-header">
               <AlertBadge :level="alert.level" />
               <n-tag :type="getStatusTag(alert.status)">{{ getStatusName(alert.status) }}</n-tag>
-              <n-tag :type="getTypeTag(alert.ruleType)">{{ getTypeName(alert.ruleType) }}</n-tag>
-              <span class="alert-time">{{ formatTime(alert.createdAt) }}</span>
+              <n-tag :type="getTypeTag(getRuleType(alert))">{{ getTypeName(getRuleType(alert)) }}</n-tag>
+              <span class="alert-time">{{ formatTime(alert.triggeredAt) }}</span>
             </div>
             <div class="alert-title">{{ alert.title }}</div>
-            <div class="alert-message">{{ alert.message }}</div>
+            <div class="alert-message">{{ alert.description }}</div>
             
             <!-- AI 分析结果 -->
             <div v-if="alert.cause || alert.advice" class="alert-analysis">
@@ -135,7 +135,7 @@ import AlertBadge from '@/components/ui/AlertBadge.vue'
 import { useAlertStore } from '@/stores/alertStore'
 import { createAlertAdvisor } from '@/ai/alertAdvisor'
 import { useDataStore } from '@/stores/data'
-import type { AlertRecord, AlertLevel, AlertStatus } from '@/interfaces/alert'
+import type { AlertEvent, AlertLevel, AlertStatus } from '@/interfaces/alert'
 import dayjs from 'dayjs'
 
 const alertStore = useAlertStore()
@@ -167,7 +167,7 @@ const typeOptions = [
   { label: '传播', value: 'propagation' },
 ]
 
-const stats = computed(() => alertStore.stats)
+const stats = computed(() => alertStore.alertStats)
 
 const filteredAlerts = computed(() => {
   let result = alertStore.alerts
@@ -181,7 +181,11 @@ const filteredAlerts = computed(() => {
   }
   
   if (filterType.value) {
-    result = result.filter((a) => a.ruleType === filterType.value)
+    // 从 ruleId 获取规则类型
+    result = result.filter((a) => {
+      const rule = alertStore.rules.find((r) => r.id === a.ruleId)
+      return rule?.type === filterType.value
+    })
   }
   
   return result
@@ -233,22 +237,52 @@ const getTypeTag = (type: string) => {
   return map[type] || 'default'
 }
 
-const handleAnalyze = async (alert: AlertRecord) => {
+const getRuleType = (alert: AlertEvent): string => {
+  const rule = alertStore.rules.find((r) => r.id === alert.ruleId)
+  return rule?.type || 'unknown'
+}
+
+const handleAnalyze = async (alert: AlertEvent) => {
   analyzingId.value = alert.id
   
   try {
     // 获取关联的数据
     const alertData: any[] = []
     
+    // 从 IndexedDB 获取数据
+    const { db } = await import('@/db/indexedDB')
+    
     for (const dataId of alert.dataIds) {
-      if (alert.dataType === 'webmedia' || alert.dataType === 'mixed') {
-        const webmedia = dataStore.webmediaData.find((d) => d.id === dataId)
-        if (webmedia) alertData.push(webmedia)
+      // 尝试从 webmedia 表获取
+      try {
+        const webmediaId = typeof dataId === 'string' && dataId.startsWith('WM') 
+          ? parseInt(dataId.replace('WM', ''), 10) 
+          : typeof dataId === 'number' ? dataId : parseInt(String(dataId), 10)
+        if (!isNaN(webmediaId)) {
+          const webmedia = await db.webmedia.get(webmediaId)
+          if (webmedia) {
+            alertData.push(webmedia)
+            continue
+          }
+        }
+      } catch (e) {
+        // 忽略错误，继续尝试 weibo
       }
       
-      if (alert.dataType === 'weibo' || alert.dataType === 'mixed') {
-        const weibo = dataStore.weiboData.find((d) => d.id === dataId)
-        if (weibo) alertData.push(weibo)
+      // 尝试从 weibos 表获取
+      try {
+        const weiboId = typeof dataId === 'string' && dataId.startsWith('WB')
+          ? parseInt(dataId.replace('WB', ''), 10)
+          : typeof dataId === 'number' ? dataId : parseInt(String(dataId), 10)
+        if (!isNaN(weiboId)) {
+          const weibo = await db.weibos.get(weiboId)
+          if (weibo) {
+            alertData.push(weibo)
+            continue
+          }
+        }
+      } catch (e) {
+        // 忽略错误
       }
     }
     
@@ -259,7 +293,8 @@ const handleAnalyze = async (alert: AlertRecord) => {
     
     // 调用 AI 分析
     const advisor = createAlertAdvisor()
-    const analysis = await advisor.analyze(alertData, alert.ruleType, alert.level)
+    const ruleType = getRuleType(alert) as 'keyword' | 'sentiment' | 'volume' | 'spread'
+    const analysis = await advisor.analyze(alertData, ruleType, alert.level)
     
     // 更新预警记录
     await alertStore.updateAlertAnalysis(alert.id, analysis.cause, analysis.advice)
@@ -281,17 +316,17 @@ const handleUpdateStatus = async (id: string, status: AlertStatus) => {
   }
 }
 
-const handleViewDetails = (alert: AlertRecord) => {
+const handleViewDetails = (alert: AlertEvent) => {
   dialog.info({
     title: '预警详情',
     content: `
       <div>
         <p><strong>标题：</strong>${alert.title}</p>
-        <p><strong>详情：</strong>${alert.message}</p>
+        <p><strong>详情：</strong>${alert.description}</p>
         <p><strong>级别：</strong>${alert.level}</p>
         <p><strong>状态：</strong>${getStatusName(alert.status)}</p>
-        <p><strong>类型：</strong>${getTypeName(alert.ruleType)}</p>
-        <p><strong>创建时间：</strong>${formatTime(alert.createdAt)}</p>
+        <p><strong>类型：</strong>${getTypeName(getRuleType(alert))}</p>
+        <p><strong>触发时间：</strong>${formatTime(alert.triggeredAt)}</p>
         ${alert.cause ? `<p><strong>原因：</strong>${alert.cause}</p>` : ''}
         ${alert.advice && alert.advice.length > 0 ? `<p><strong>建议：</strong><ul>${alert.advice.map(a => `<li>${a}</li>`).join('')}</ul></p>` : ''}
       </div>

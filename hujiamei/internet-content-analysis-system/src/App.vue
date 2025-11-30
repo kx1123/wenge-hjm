@@ -69,9 +69,38 @@
         />
 
         <!-- AI聊天助手（固定在底部） -->
-        <!-- <div class="ai-chat-container">
-          <AIChatPanel />
-        </div> -->
+        <Transition name="slide-up">
+          <div v-if="showChatPanel" class="ai-chat-container">
+            <AIChatPanel :on-send="handleChatSend" />
+            <n-button
+              class="close-chat-btn"
+              circle
+              size="small"
+              type="error"
+              @click="showChatPanel = false"
+            >
+              <template #icon>
+                <span>✕</span>
+              </template>
+            </n-button>
+          </div>
+        </Transition>
+        
+        <!-- 打开聊天助手按钮（当面板关闭时显示） -->
+        <Transition name="fade">
+          <n-button
+            v-if="!showChatPanel"
+            class="open-chat-btn"
+            circle
+            type="primary"
+            size="large"
+            @click="showChatPanel = true"
+          >
+            <template #icon>
+              <span>💬</span>
+            </template>
+          </n-button>
+        </Transition>
       </n-layout>
       </n-dialog-provider>
     </n-message-provider>
@@ -95,6 +124,8 @@ import {
 import AIChatPanel from '@/components/AIChatPanel.vue'
 import AlertToast from '@/components/Alert/AlertToast.vue'
 import { useAlertStore } from '@/stores/alertStore'
+import { createChatEngine } from '@/ai/chatEngine'
+import { db } from '@/db/indexedDB'
 import type { AlertLevel } from '@/interfaces/alert'
 
 const route = useRoute()
@@ -103,6 +134,22 @@ const alertStore = useAlertStore()
 
 const currentRoute = computed(() => route.path)
 const theme = darkTheme
+
+// 聊天助手状态
+const showChatPanel = ref(true) // 默认显示
+const chatEngine = createChatEngine(db)
+
+// 处理聊天消息
+async function handleChatSend(message: string, history: any[] = []): Promise<{ content: string }> {
+  try {
+    // 使用 chatEngine 发送消息并返回回复，传递历史消息以支持多轮对话
+    const reply = await chatEngine.sendMessage(message, history)
+    return reply
+  } catch (error) {
+    console.error('聊天发送失败:', error)
+    throw error
+  }
+}
 
 // 预警 Toast 管理
 interface ToastItem {
@@ -199,12 +246,73 @@ body {
 
 .ai-chat-container {
   position: fixed;
-  bottom: 0;
-  right: 0;
+  bottom: 20px;
+  right: 20px;
   width: 400px;
   height: 500px;
+  max-height: calc(100vh - 40px);
   z-index: 1000;
-  box-shadow: -2px -2px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.close-chat-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1001;
+  background-color: rgba(239, 68, 68, 0.9) !important;
+  border: none !important;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-chat-btn:hover {
+  background-color: rgba(239, 68, 68, 1) !important;
+}
+
+.open-chat-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999;
+  width: 56px;
+  height: 56px;
+  min-width: 56px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  border-radius: 50%;
+}
+
+/* 动画 */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.slide-up-enter-from {
+  transform: translateY(100%);
+  opacity: 0;
+}
+
+.slide-up-leave-to {
+  transform: translateY(100%);
+  opacity: 0;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
 
