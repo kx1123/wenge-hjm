@@ -1,20 +1,5 @@
 import Dexie, { type Table } from 'dexie'
 import type { WebMediaData, WeiboData, DataSource } from '@/interfaces/data'
-import type { AlertRecord, AlertRule } from '@/interfaces/alert'
-
-/**
- * AI缓存接口
- */
-export interface AICache {
-  id?: number
-  cacheKey: string // `${hash(content)}_${dataType}_${promptVersion}`
-  dataType: 'webmedia' | 'weibo'
-  promptType: 'sentiment' | 'keywords' | 'summary' | 'category' | 'topic' | 'full'
-  promptVersion: string
-  result: string // JSON stringified result
-  createdAt: string
-  expiresAt: string
-}
 
 /**
  * IndexedDB数据库类
@@ -22,23 +7,14 @@ export interface AICache {
 class ContentAnalysisDB extends Dexie {
   webmedia!: Table<WebMediaData, number>
   weibos!: Table<WeiboData, number>
-  aiCache!: Table<AICache, number>
-  alerts!: Table<AlertEvent, string>
-  alertRules!: Table<AlertRule, string>
 
   constructor() {
     super('ContentAnalysisDB')
-    this.version(4).stores({
+    this.version(1).stores({
       // 表 webmedia：字段 + 索引 ['publishTime', 'sentiment', 'source']
       webmedia: '++id, publishTime, sentiment, source',
       // 表 weibos：字段 + 索引 ['publishTime', 'sentiment', 'userName']
       weibos: '++id, publishTime, sentiment, userName',
-      // AI缓存表：key = `${hash(content)}_${dataType}_${promptVersion}`
-      aiCache: '++id, cacheKey, dataType, promptType, expiresAt',
-      // 预警记录表：id 为字符串，索引 triggeredAt, level, status, ruleId
-      alerts: 'id, triggeredAt, level, status, ruleId',
-      // 预警规则表：id 为字符串，索引 type, enabled
-      alertRules: 'id, type, enabled',
     })
   }
 }
@@ -102,14 +78,11 @@ export interface Stats {
  */
 export async function insertWebMedia(data: WebMediaData[]): Promise<number[]> {
   try {
-    // 移除 id 字段，让 Dexie 自动生成 number 类型的主键
-    const dataWithoutId = data.map(({ id, ...rest }) => rest)
-    return await db.webmedia.bulkAdd(dataWithoutId)
+    return await db.webmedia.bulkAdd(data)
   } catch (error) {
     // 如果存在重复键，使用 bulkPut
     if (error instanceof Error && error.name === 'ConstraintError') {
-      const dataWithoutId = data.map(({ id, ...rest }) => rest)
-      return await db.webmedia.bulkPut(dataWithoutId)
+      return await db.webmedia.bulkPut(data)
     }
     throw error
   }
@@ -120,14 +93,11 @@ export async function insertWebMedia(data: WebMediaData[]): Promise<number[]> {
  */
 export async function insertWeibos(data: WeiboData[]): Promise<number[]> {
   try {
-    // 移除 id 字段，让 Dexie 自动生成 number 类型的主键
-    const dataWithoutId = data.map(({ id, ...rest }) => rest)
-    return await db.weibos.bulkAdd(dataWithoutId)
+    return await db.weibos.bulkAdd(data)
   } catch (error) {
     // 如果存在重复键，使用 bulkPut
     if (error instanceof Error && error.name === 'ConstraintError') {
-      const dataWithoutId = data.map(({ id, ...rest }) => rest)
-      return await db.weibos.bulkPut(dataWithoutId)
+      return await db.weibos.bulkPut(data)
     }
     throw error
   }
@@ -335,157 +305,42 @@ export async function addWeiboData(data: WeiboData[]): Promise<number[]> {
 }
 
 /**
- * 将 id 转换为 number 类型（用于 Dexie 主键）
- * Dexie 主键必须是 number 类型，所以需要确保 id 是有效的数字
- */
-function normalizeId(id: string | number | undefined | null): number | null {
-  if (id === undefined || id === null) {
-    return null
-  }
-  
-  // 如果已经是 number 类型，直接验证并返回
-  if (typeof id === 'number') {
-    // Dexie 主键必须是正整数
-    if (isNaN(id) || !isFinite(id) || id <= 0 || !Number.isInteger(id)) {
-      console.warn('Invalid numeric id:', id)
-      return null
-    }
-    return id
-  }
-  
-  // 如果是字符串，尝试解析
-  if (typeof id === 'string') {
-    // 先尝试直接解析（处理纯数字字符串）
-    const directNum = parseInt(id, 10)
-    if (!isNaN(directNum) && isFinite(directNum) && directNum > 0 && Number.isInteger(directNum)) {
-      return directNum
-    }
-    
-    // 尝试提取数字部分（处理 "WM123" 或 "WB123" 格式）
-    const match = id.match(/\d+/)
-    if (match) {
-      const num = parseInt(match[0], 10)
-      if (!isNaN(num) && isFinite(num) && num > 0 && Number.isInteger(num)) {
-        return num
-      }
-    }
-    
-    console.warn('Cannot parse string id to number:', id)
-    return null
-  }
-  
-  console.warn('Unknown id type:', typeof id, id)
-  return null
-}
-
-/**
  * 更新网媒数据（用于AI分析结果）
  */
 export async function updateWebMediaData(
-  id: string | number | undefined | null,
+  id: number,
   updates: Partial<WebMediaData>
 ): Promise<number> {
-  const numericId = normalizeId(id)
-  
-  if (numericId === null) {
-    throw new Error(`Invalid id: ${id}. Expected number or numeric string.`)
-  }
-  
-  try {
-    return await db.webmedia.update(numericId, updates)
-  } catch (error) {
-    console.error('更新网媒数据失败:', { id, numericId, error })
-    throw error
-  }
+  return await db.webmedia.update(id, updates)
 }
 
 /**
  * 更新微博数据（用于AI分析结果）
  */
-export async function updateWeiboData(
-  id: string | number | undefined | null,
-  updates: Partial<WeiboData>
-): Promise<number> {
-  const numericId = normalizeId(id)
-  
-  if (numericId === null) {
-    throw new Error(`Invalid id: ${id}. Expected number or numeric string.`)
-  }
-  
-  try {
-    return await db.weibos.update(numericId, updates)
-  } catch (error) {
-    console.error('更新微博数据失败:', { id, numericId, error })
-    throw error
-  }
+export async function updateWeiboData(id: number, updates: Partial<WeiboData>): Promise<number> {
+  return await db.weibos.update(id, updates)
 }
 
 /**
  * 获取未分析的网媒数据
  */
 export async function getUnanalyzedWebMedia(limit?: number): Promise<WebMediaData[]> {
-  const data = await db.webmedia
+  return await db.webmedia
     .where('sentiment')
     .equals(undefined)
     .limit(limit || 100)
     .toArray()
-  // 确保所有数据的 id 都是 number 类型（Dexie 主键始终是 number）
-  return data.map((item) => {
-    // Dexie 返回的数据，id 应该已经是 number 类型
-    // 但为了安全，我们确保它是 number
-    let id: number
-    if (typeof item.id === 'number') {
-      id = item.id
-    } else if (typeof item.id === 'string') {
-      const parsed = normalizeId(item.id)
-      if (parsed === null) {
-        console.warn('无法解析 id，跳过该数据:', item.id)
-        return null
-      }
-      id = parsed
-    } else {
-      console.warn('无效的 id 类型，跳过该数据:', item.id)
-      return null
-    }
-    return {
-      ...item,
-      id,
-    }
-  }).filter((item): item is WebMediaData => item !== null)
 }
 
 /**
  * 获取未分析的微博数据
  */
 export async function getUnanalyzedWeibos(limit?: number): Promise<WeiboData[]> {
-  const data = await db.weibos
+  return await db.weibos
     .where('sentiment')
     .equals(undefined)
     .limit(limit || 100)
     .toArray()
-  // 确保所有数据的 id 都是 number 类型（Dexie 主键始终是 number）
-  return data.map((item) => {
-    // Dexie 返回的数据，id 应该已经是 number 类型
-    // 但为了安全，我们确保它是 number
-    let id: number
-    if (typeof item.id === 'number') {
-      id = item.id
-    } else if (typeof item.id === 'string') {
-      const parsed = normalizeId(item.id)
-      if (parsed === null) {
-        console.warn('无法解析 id，跳过该数据:', item.id)
-        return null
-      }
-      id = parsed
-    } else {
-      console.warn('无效的 id 类型，跳过该数据:', item.id)
-      return null
-    }
-    return {
-      ...item,
-      id,
-    }
-  }).filter((item): item is WeiboData => item !== null)
 }
 
 /**

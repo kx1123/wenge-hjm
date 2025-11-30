@@ -20,14 +20,12 @@ export interface WebMediaData {
   // AI分析字段（可选）
   sentiment?: 'positive' | 'neutral' | 'negative'
   sentimentScore?: number // 情感得分（0-100）
-  sentimentConfidence?: number // 情感分析置信度（0-1）
   keywords?: string[] // AI提取的关键词
   aiKeywords?: string[] // AI关键词（别名）
   summary?: string // AI生成的摘要
   aiSummary?: string // AI摘要（别名）
   aiCategory?: string // AI分类（投诉/建议/咨询/表扬/中性报道等）
   topics?: string[] // 话题标签（用于聚类分析）
-  eventId?: string // 事件ID（用于跨源关联）
   isWarning?: boolean // 是否预警
   warningLevel?: 'low' | 'medium' | 'high' // 预警级别
   analyzedAt?: string // 分析时间
@@ -54,7 +52,6 @@ export interface WeiboData {
   // AI分析字段（可选）
   sentiment?: 'positive' | 'neutral' | 'negative'
   sentimentScore?: number // 情感得分（0-100）
-  sentimentConfidence?: number // 情感分析置信度（0-1）
   keywords?: string[] // AI提取的关键词
   aiKeywords?: string[] // AI关键词（别名）
   summary?: string // AI生成的摘要

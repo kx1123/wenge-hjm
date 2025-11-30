@@ -1,254 +1,119 @@
 <template>
-  <div class="report-view">
-    <n-card class="report-main-card">
+  <div class="report-view p-6">
+    <n-card>
       <template #header>
-        <div class="report-header">
-          <h2 class="text-2xl font-bold text-white">数据分析报告</h2>
-        </div>
+        <h2 class="text-2xl font-bold">数据分析报告</h2>
       </template>
 
-      <!-- 控制区域 -->
-      <div class="report-controls">
-        <n-space align="center" :wrap="false">
-          <n-radio-group v-model:value="reportType" size="medium">
-            <n-radio-button value="daily">📅 日报</n-radio-button>
-            <n-radio-button value="weekly">📆 周报</n-radio-button>
-            <n-radio-button value="monthly">📊 月报</n-radio-button>
-          </n-radio-group>
-          
-          <n-date-picker
-            v-model:value="selectedDate"
-            type="date"
-            format="yyyy-MM-dd"
-            :is-date-disabled="disableDate"
-            placeholder="选择日期"
-            clearable
-            style="width: 200px;"
+      <n-space vertical>
+        <n-space>
+          <n-select
+            v-model:value="reportType"
+            :options="reportTypeOptions"
+            style="width: 200px"
           />
-          
-          <n-button
-            type="primary"
-            @click="handleGenerateReport"
-            :loading="generating"
-            :disabled="!selectedDate"
-            size="medium"
-          >
-            <template #icon>
-              <span>🚀</span>
-            </template>
+          <n-date-picker
+            v-model:value="dateRange"
+            type="daterange"
+            clearable
+            placeholder="选择时间范围"
+          />
+          <n-button type="primary" @click="handleGenerateReport" :loading="generating">
             生成报告
           </n-button>
         </n-space>
-      </div>
 
-      <!-- 生成进度提示 -->
-      <Transition name="fade">
-        <div v-if="generating" class="generating-tip">
-          <n-progress
-            type="line"
-            :percentage="progress"
-            :status="progressStatus"
-            :show-indicator="true"
-          />
-          <div class="progress-text">
-            <n-spin size="small" />
-            <span class="ml-2">{{ progressText }}</span>
-          </div>
-        </div>
-      </Transition>
-
-      <!-- 报告预览区 -->
-      <div class="report-preview" v-if="reportContent || generating">
-        <div class="report-content" ref="reportContentRef" v-html="renderedContent"></div>
-      </div>
-
-      <!-- 空状态 -->
-      <n-empty
-        v-else
-        description="请选择报告类型和日期，然后点击「生成报告」"
-        style="padding: 60px 0;"
-      />
-
-      <!-- 操作按钮 -->
-      <template #footer v-if="reportContent">
-        <div class="report-actions">
-          <n-space justify="end">
-            <n-button @click="handleCopyReport" secondary>
-              <template #icon>
-                <span>📋</span>
-              </template>
-              复制报告
-            </n-button>
-            <n-button type="primary" @click="handleDownloadPDF" :loading="exportingPDF">
-              <template #icon>
-                <span>📄</span>
-              </template>
-              下载 PDF
-            </n-button>
-          </n-space>
-        </div>
-      </template>
+        <n-card v-if="reportContent" title="报告内容">
+          <div class="report-content whitespace-pre-wrap">{{ reportContent }}</div>
+          <template #footer>
+            <n-space justify="end">
+              <n-button @click="handleCopyReport">复制报告</n-button>
+              <n-button type="primary" @click="handleDownloadReport">下载报告</n-button>
+            </n-space>
+          </template>
+        </n-card>
+      </n-space>
     </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed } from 'vue'
 import {
   NCard,
   NSpace,
-  NRadioGroup,
-  NRadioButton,
+  NSelect,
   NDatePicker,
   NButton,
-  NProgress,
-  NSpin,
-  NEmpty,
   useMessage,
 } from 'naive-ui'
-import { generateReport, type ReportType } from '@/features/report/reportGenerator'
+import { createAIAnalyzer } from '@/ai/client'
+import { getReportPrompt } from '@/ai/prompts/report'
+import { useDataStore } from '@/stores/data'
+import { getSentimentStats } from '@/db/indexedDB'
 import dayjs from 'dayjs'
-import jsPDF from 'jspdf'
-import html2canvas from 'html2canvas'
 
 const message = useMessage()
+const dataStore = useDataStore()
 
-// 报告类型和日期
-const reportType = ref<ReportType>('daily')
-const selectedDate = ref<number | null>(Date.now())
+const reportType = ref<'webmedia' | 'weibo' | 'all'>('all')
+const dateRange = ref<[number, number] | null>(null)
 const reportContent = ref('')
-const reportContentRef = ref<HTMLElement | null>(null)
-
-// 生成状态
 const generating = ref(false)
-const progress = ref(0)
-const progressStatus = ref<'success' | 'error' | 'warning' | 'info'>('info')
-const progressText = ref('准备生成报告...')
 
-// 导出状态
-const exportingPDF = ref(false)
-
-/**
- * 禁用未来日期
- */
-function disableDate(timestamp: number): boolean {
-  return timestamp > Date.now()
-}
-
-/**
- * 渲染 Markdown 为 HTML
- */
-function renderMarkdown(text: string): string {
-  if (!text) return ''
-  
-  // 转义 HTML
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  
-  // 标题 # ## ###
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
-  
-  // 粗体 **text**
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  
-  // 斜体 *text*
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  
-  // 代码块 ```code```
-  html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-  
-  // 行内代码 `code`
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-  
-  // 链接 [text](url)
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
-  
-  // 列表项 - item
-  html = html.replace(/^\- (.+)$/gm, '<li>$1</li>')
-  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-  
-  // 有序列表 1. item
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-  
-  // 换行（保留段落）
-  html = html.replace(/\n\n/g, '</p><p>')
-  html = html.replace(/\n/g, '<br>')
-  
-  // 包装段落
-  if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<pre')) {
-    html = '<p>' + html + '</p>'
-  }
-  
-  return html
-}
-
-/**
- * 渲染后的内容
- */
-const renderedContent = computed(() => {
-  return renderMarkdown(reportContent.value)
-})
+const reportTypeOptions = [
+  { label: '全部数据', value: 'all' },
+  { label: '网媒数据', value: 'webmedia' },
+  { label: '微博数据', value: 'weibo' },
+]
 
 const handleGenerateReport = async () => {
-  if (!selectedDate.value) {
-    message.warning('请先选择日期')
-    return
-  }
-
   generating.value = true
-  progress.value = 0
-  progressStatus.value = 'info'
-  progressText.value = '正在聚合数据...'
   reportContent.value = ''
 
   try {
-    // 模拟进度更新
-    const progressInterval = setInterval(() => {
-      if (progress.value < 90) {
-        progress.value += 10
-        if (progress.value < 30) {
-          progressText.value = '正在聚合数据...'
-        } else if (progress.value < 60) {
-          progressText.value = '正在调用 AI 生成报告...'
-        } else {
-          progressText.value = '正在格式化报告内容...'
-        }
-      }
-    }, 500)
+    const stats = await getSentimentStats()
+    const timeRange = dateRange.value
+      ? `${dayjs(dateRange.value[0]).format('YYYY-MM-DD')} 至 ${dayjs(dateRange.value[1]).format('YYYY-MM-DD')}`
+      : '全部时间'
 
-    const dateStr = dayjs(selectedDate.value).format('YYYY-MM-DD')
-    const startTime = Date.now()
-    
-    const content = await generateReport({
-      type: reportType.value,
-      date: dateStr,
-    })
+    if (reportType.value === 'all') {
+      // 生成综合报告
+      const total = stats.webmedia.positive + stats.webmedia.neutral + stats.webmedia.negative
+        + stats.weibos.positive + stats.weibos.neutral + stats.weibos.negative
 
-    clearInterval(progressInterval)
-    progress.value = 100
-    progressStatus.value = 'success'
-    progressText.value = `报告生成完成（耗时 ${Math.round((Date.now() - startTime) / 1000)} 秒）`
+      const prompt = getReportPrompt('webmedia', {
+        total,
+        positive: stats.webmedia.positive + stats.weibos.positive,
+        neutral: stats.webmedia.neutral + stats.weibos.neutral,
+        negative: stats.webmedia.negative + stats.weibos.negative,
+        topKeywords: [],
+        timeRange,
+      })
 
-    reportContent.value = content
+      const analyzer = createAIAnalyzer({ mock: true })
+      reportContent.value = await analyzer.chat([{ role: 'user', content: prompt }])
+    } else {
+      const typeStats = reportType.value === 'webmedia' ? stats.webmedia : stats.weibos
+      const total = typeStats.positive + typeStats.neutral + typeStats.negative
 
-    // 延迟隐藏进度条
-    setTimeout(() => {
-      generating.value = false
-    }, 2000)
+      const prompt = getReportPrompt(reportType.value, {
+        total,
+        positive: typeStats.positive,
+        neutral: typeStats.neutral,
+        negative: typeStats.negative,
+        topKeywords: [],
+        timeRange,
+      })
 
-    message.success('报告生成成功')
+      const analyzer = createAIAnalyzer({ mock: true })
+      reportContent.value = await analyzer.chat([{ role: 'user', content: prompt }])
+    }
   } catch (error) {
-    progress.value = 100
-    progressStatus.value = 'error'
-    progressText.value = '报告生成失败'
+    message.error('生成报告失败')
+    console.error(error)
+  } finally {
     generating.value = false
-    
-    console.error('生成报告失败:', error)
-    message.error('生成报告失败: ' + (error instanceof Error ? error.message : '未知错误'))
   }
 }
 
@@ -261,218 +126,29 @@ const handleCopyReport = async () => {
   }
 }
 
-/**
- * 导出 PDF
- */
-async function handleDownloadPDF() {
-  if (!reportContentRef.value) {
-    message.warning('没有可导出的内容')
-    return
-  }
-
-  exportingPDF.value = true
-
-  try {
-    // 使用 html2canvas 截图
-    const canvas = await html2canvas(reportContentRef.value, {
-      scale: 2, // 提高清晰度
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-    })
-
-    // 计算 PDF 尺寸（A4: 210mm x 297mm）
-    const imgWidth = canvas.width
-    const imgHeight = canvas.height
-    const pdfWidth = 210 // A4 宽度（mm）
-    const pdfHeight = 297 // A4 高度（mm）
-    const imgAspectRatio = imgWidth / imgHeight
-    const pdfAspectRatio = pdfWidth / pdfHeight
-    
-    // 计算图片在 PDF 中的实际尺寸
-    let imgPdfWidth = pdfWidth
-    let imgPdfHeight = pdfWidth / imgAspectRatio
-    
-    // 如果图片高度超过 PDF 高度，按高度缩放
-    if (imgPdfHeight > pdfHeight) {
-      imgPdfHeight = pdfHeight
-      imgPdfWidth = pdfHeight * imgAspectRatio
-    }
-
-    // 创建 PDF（A4 格式）
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4',
-    })
-
-    const imgData = canvas.toDataURL('image/png', 1.0)
-    
-    // 如果内容超过一页，需要分页
-    const pageHeight = pdf.internal.pageSize.height
-    let heightLeft = imgPdfHeight
-    let position = 0
-
-    // 添加第一页
-    pdf.addImage(imgData, 'PNG', (pdfWidth - imgPdfWidth) / 2, position, imgPdfWidth, imgPdfHeight)
-    heightLeft -= pageHeight
-
-    // 如果还有内容，继续添加页面
-    while (heightLeft > 0) {
-      position = heightLeft - imgPdfHeight
-      pdf.addPage()
-      pdf.addImage(imgData, 'PNG', (pdfWidth - imgPdfWidth) / 2, position, imgPdfWidth, imgPdfHeight)
-      heightLeft -= pageHeight
-    }
-
-    // 保存文件
-    const fileName = `舆情分析报告_${reportType.value}_${dayjs(selectedDate.value).format('YYYY-MM-DD')}.pdf`
-    pdf.save(fileName)
-
-    message.success('PDF 导出成功')
-  } catch (error) {
-    console.error('导出 PDF 失败:', error)
-    message.error('导出 PDF 失败: ' + (error instanceof Error ? error.message : '未知错误'))
-  } finally {
-    exportingPDF.value = false
-  }
+const handleDownloadReport = () => {
+  const blob = new Blob([reportContent.value], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `数据分析报告_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.txt`
+  a.click()
+  URL.revokeObjectURL(url)
+  message.success('报告下载成功')
 }
 </script>
 
 <style scoped>
 .report-view {
-  @apply w-full h-full p-6;
-  background-color: #0a0a0a;
-  min-height: calc(100vh - 80px);
-}
-
-.report-main-card {
-  @apply bg-gray-900 text-gray-200;
-  max-width: 1400px;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
-.report-header {
-  @apply flex items-center justify-between;
-}
-
-.report-controls {
-  @apply mb-4 pb-4 border-b border-gray-700;
-}
-
-.generating-tip {
-  @apply mb-4 p-4 bg-gray-800 rounded-lg;
-}
-
-.progress-text {
-  @apply flex items-center mt-2 text-sm text-gray-400;
-}
-
-.report-preview {
-  @apply mt-4;
-  max-height: calc(100vh - 400px);
-  overflow-y: auto;
-  min-height: 400px;
-}
-
-/* 自定义滚动条 */
-.report-preview::-webkit-scrollbar {
-  width: 8px;
-}
-
-.report-preview::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
-}
-
-.report-preview::-webkit-scrollbar-thumb {
-  background: rgba(59, 130, 246, 0.5);
-  border-radius: 4px;
-}
-
-.report-preview::-webkit-scrollbar-thumb:hover {
-  background: rgba(59, 130, 246, 0.7);
-}
-
 .report-content {
-  @apply p-6 bg-white text-gray-900 rounded-lg;
-  min-height: 400px;
   line-height: 1.8;
-}
-
-/* Markdown 样式 */
-.report-content :deep(h1) {
-  @apply text-3xl font-bold mb-4 mt-6 pb-2 border-b-2 border-gray-300;
-  color: #1f2937;
-}
-
-.report-content :deep(h2) {
-  @apply text-2xl font-bold mb-3 mt-5;
-  color: #374151;
-}
-
-.report-content :deep(h3) {
-  @apply text-xl font-semibold mb-2 mt-4;
-  color: #4b5563;
-}
-
-.report-content :deep(p) {
-  @apply mb-3;
-  color: #1f2937;
-}
-
-.report-content :deep(strong) {
-  @apply font-bold;
-  color: #1f2937;
-}
-
-.report-content :deep(em) {
-  @apply italic;
-}
-
-.report-content :deep(code) {
-  @apply bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono;
-  color: #dc2626;
-}
-
-.report-content :deep(pre) {
-  @apply bg-gray-100 p-4 rounded my-3 overflow-x-auto;
-}
-
-.report-content :deep(pre code) {
-  @apply bg-transparent p-0 text-gray-800;
-}
-
-.report-content :deep(ul),
-.report-content :deep(ol) {
-  @apply my-3 ml-6;
-}
-
-.report-content :deep(li) {
-  @apply mb-1;
-}
-
-.report-content :deep(a) {
-  @apply text-blue-600 hover:text-blue-800 underline;
-}
-
-.report-content :deep(hr) {
-  @apply my-4 border-gray-300;
-}
-
-.report-actions {
-  @apply pt-4 border-t border-gray-700;
-}
-
-/* 动画 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+  padding: 1rem;
+  background-color: #f9fafb;
+  border-radius: 6px;
 }
 </style>
 

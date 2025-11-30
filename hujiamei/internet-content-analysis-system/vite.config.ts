@@ -23,30 +23,8 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3001,
+    port: 3000,
     open: true,
-    proxy: {
-      '/api/dashscope': {
-        target: 'https://dashscope.aliyuncs.com',
-        changeOrigin: true,
-        rewrite: (path) => '/api/v1/services/aigc/text-generation/generation',
-        secure: true,
-        configure: (proxy, _options) => {
-          proxy.on('proxyReq', (proxyReq, req, _res) => {
-            // 保留原始请求头
-            if (req.headers.authorization) {
-              proxyReq.setHeader('Authorization', req.headers.authorization)
-            }
-            if (req.headers['content-type']) {
-              proxyReq.setHeader('Content-Type', req.headers['content-type'])
-            }
-            if (req.headers['x-dashscope-sse']) {
-              proxyReq.setHeader('X-DashScope-SSE', req.headers['x-dashscope-sse'])
-            }
-          })
-        },
-      },
-    },
   },
 })
 
